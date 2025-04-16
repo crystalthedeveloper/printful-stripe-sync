@@ -22,6 +22,7 @@ jobs:
 
       - name: Run sync script
         env:
+          STRIPE_SECRET_TEST: ${{ secrets.STRIPE_SECRET_TEST }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           PRINTFUL_API_KEY: ${{ secrets.PRINTFUL_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
