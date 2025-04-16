@@ -48,9 +48,10 @@ async function sync() {
         });
 
         insertMappings.push({
-          printful_variant_id: printful_variant_id.toString(),
-          stripe_price_id: stripePrice.id
-        });
+            printful_variant_id: printful_variant_id.toString(),
+            stripe_price_id: stripePrice.id,
+            retail_price: parseFloat(retail_price)
+          });          
       }
     }
 
@@ -67,7 +68,8 @@ async function sync() {
     });
 
     if (!supabaseRes.ok) {
-      throw new Error("Failed to insert variant mappings into Supabase");
+      const error = await supabaseRes.text();
+      throw new Error(`Failed to insert variant mappings into Supabase: ${error}`);
     }
 
     console.log("✅ Synced all Printful variants to Stripe and stored mappings in Supabase");
