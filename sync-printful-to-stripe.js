@@ -56,7 +56,7 @@ async function sync() {
     }
 
     // Step 2: Insert mappings into Supabase
-    const supabaseRes = await fetch(`${SUPABASE_URL}/rest/v1/variant_mappings`, {
+    const supabaseRes = await fetch(`${SUPABASE_URL}/rest/v1/variant_mappings?on_conflict=printful_variant_id`, {
       method: "POST",
       headers: {
         apikey: SUPABASE_SERVICE_ROLE_KEY,
