@@ -30,8 +30,18 @@ async function sync() {
       headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` }
     });
 
-    const { result: productList } = await res.json();
+    const rawText = await res.text();
+    let productData;
+
+    try {
+      productData = JSON.parse(rawText);
+    } catch (e) {
+      throw new Error("❌ Failed to parse Printful response: " + rawText);
+    }
+
+    const productList = productData.result;
     if (!productList || !Array.isArray(productList)) {
+      console.error("❌ Invalid Printful product list response:", productData);
       throw new Error("No products found from Printful");
     }
 
@@ -42,10 +52,18 @@ async function sync() {
         headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` }
       });
 
-      const productData = await detailRes.json();
+      const detailRaw = await detailRes.text();
+      let detailData;
 
-      const productName = productData.result?.sync_product?.name;
-      const syncVariants = productData.result?.sync_variants;
+      try {
+        detailData = JSON.parse(detailRaw);
+      } catch {
+        console.warn(`⚠️ Failed to parse product ${product.id} detail response:`, detailRaw);
+        continue;
+      }
+
+      const productName = detailData.result?.sync_product?.name;
+      const syncVariants = detailData.result?.sync_variants;
 
       if (!detailRes.ok || !productName || !syncVariants) {
         console.warn(`⚠️ Skipping product ID ${product.id} due to missing data`);
