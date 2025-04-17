@@ -1,11 +1,12 @@
 // sync-printful-to-stripe.js
-// Syncs Printful variants to Stripe and Supabase (even if missing image)
+// Syncs live Printful variants to Stripe and Supabase with full metadata (image optional)
 
 import dotenv from "dotenv";
 import Stripe from "stripe";
 import fetch from "node-fetch";
 dotenv.config();
 
+// ENV setup
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const PRINTFUL_API_KEY = process.env.PRINTFUL_API_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -14,25 +15,31 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
 const MODE = "live";
 
+// Gets the main image URL from Printful variant
 async function getPrintfulImageURL(variantId) {
-  const res = await fetch(`https://api.printful.com/products/variant/${variantId}`, {
-    headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
-  });
+  try {
+    const res = await fetch(`https://api.printful.com/products/variant/${variantId}`, {
+      headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
+    });
 
-  if (!res.ok) return null;
+    if (!res.ok) return null;
 
-  const data = await res.json();
-  const file = data.result?.files?.find((f) => f.type === "preview" || f.type === "default");
-  return file?.url ?? null;
+    const data = await res.json();
+    const file = data.result?.files?.find(f => f.type === "preview" || f.type === "default");
+    return file?.url ?? null;
+  } catch {
+    return null;
+  }
 }
 
+// Validates a Printful variant (exists and has metadata)
 async function isValidPrintfulVariant(variantId) {
   try {
     const res = await fetch(`https://api.printful.com/products/variant/${variantId}`, {
       headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` }
     });
 
-    if (res.status === 404 || !res.ok) return false;
+    if (!res.ok || res.status === 404) return false;
 
     const data = await res.json();
     return !!data.result?.variant_id;
@@ -41,12 +48,15 @@ async function isValidPrintfulVariant(variantId) {
   }
 }
 
+// Main sync function
 async function sync() {
-  const res = await fetch("https://api.printful.com/sync/products", {
+  console.log("🔄 Starting Printful to Stripe & Supabase sync...");
+
+  const productRes = await fetch("https://api.printful.com/sync/products", {
     headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` }
   });
 
-  const productList = (await res.json()).result;
+  const productList = (await productRes.json()).result;
   const insertMappings = [];
 
   for (const product of productList) {
@@ -94,7 +104,7 @@ async function sync() {
       });
 
       const imageUrl = await getPrintfulImageURL(printful_variant_id);
-      if (!imageUrl) console.warn(`⚠️ No image found for variant ${printful_variant_id}`);
+      if (!imageUrl) console.warn(`⚠️ No image found for ${printful_variant_id}`);
 
       const color = options?.find(o => o.id === "color")?.value || "";
       const size = options?.find(o => o.id === "size")?.value || "";
@@ -119,6 +129,7 @@ async function sync() {
     return;
   }
 
+  // Insert into Supabase
   const supabaseRes = await fetch(`${SUPABASE_URL}/rest/v1/variant_mappings`, {
     method: "POST",
     headers: {
@@ -132,10 +143,11 @@ async function sync() {
 
   if (!supabaseRes.ok) {
     const error = await supabaseRes.text();
-    throw new Error(`❌ Failed to insert mappings into Supabase: ${error}`);
+    throw new Error(`❌ Failed to insert into Supabase: ${error}`);
   }
 
-  console.log(`🎉 Synced ${insertMappings.length} variants to Supabase`);
+  console.log(`🎉 Synced ${insertMappings.length} variants into Supabase successfully`);
 }
 
+// Run it
 sync();
