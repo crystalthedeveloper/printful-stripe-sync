@@ -1,6 +1,3 @@
-// Supabase Edge Function: stripe-webhook.ts
-// Verifies Stripe webhook signature and sends order to Printful in draft mode using variant mapping
-
 import { serve } from "https://deno.land/std@0.192.0/http/server.ts";
 
 const STRIPE_SECRET_TEST = Deno.env.get("STRIPE_SECRET_TEST");
@@ -37,22 +34,27 @@ type StripeLineItemResponse = { data: StripeLineItem[] };
 interface PrintfulFile { type: string; url: string; }
 interface PrintfulVariantResponse { result?: { files?: PrintfulFile[] }; }
 
+async function isValidPrintfulVariant(variantId: number): Promise<boolean> {
+  const res = await fetch(`https://api.printful.com/products/variant/${variantId}`, {
+    headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` }
+  });
+  if (!res.ok) return false;
+  const data: PrintfulVariantResponse = await res.json();
+  return !!(data.result?.files?.length);
+}
+
 async function getPrintfulImageURL(variantId: number): Promise<string | null> {
   const res = await fetch(`https://api.printful.com/products/variant/${variantId}`, {
     headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
   });
   const data: PrintfulVariantResponse = await res.json();
-  if (!res.ok || !data.result?.files) {
-    console.error(`❌ Failed to fetch variant ${variantId}:`, data);
-    return null;
-  }
+  if (!res.ok || !data.result?.files) return null;
   const file = data.result.files.find((f) => f.type === "default");
   return file?.url ?? null;
 }
 
 async function getMappedVariantId(stripePriceId: string): Promise<number | null> {
   const mode = stripePriceId.startsWith("price_1") ? "live" : "test";
-
   const res = await fetch(
     `${SUPABASE_URL}/rest/v1/variant_mappings?stripe_price_id=eq.${stripePriceId}&mode=eq.${mode}`,
     {
@@ -63,13 +65,11 @@ async function getMappedVariantId(stripePriceId: string): Promise<number | null>
       },
     }
   );
-
   const data = await res.json();
   if (!res.ok || !Array.isArray(data) || data.length === 0) {
-    console.error(`❌ No ${mode} mapping found for Stripe price ID:`, stripePriceId);
+    console.error(`❌ No ${mode} mapping found for Stripe price ID: ${stripePriceId}`);
     return null;
   }
-
   return Number(data[0].printful_variant_id);
 }
 
@@ -118,6 +118,12 @@ serve(async (req: Request): Promise<Response> => {
         const stripePriceId = item.price?.id;
         const variantId = await getMappedVariantId(stripePriceId);
         if (!variantId) return null;
+
+        const isValid = await isValidPrintfulVariant(variantId);
+        if (!isValid) {
+          console.warn(`⚠️ Variant ${variantId} is not valid (404 or missing print file)`);
+          return null;
+        }
 
         const fileUrl = await getPrintfulImageURL(variantId);
         return {
