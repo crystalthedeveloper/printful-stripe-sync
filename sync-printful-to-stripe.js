@@ -117,6 +117,7 @@ async function sync() {
         size,
         variant_name: variantName,
         mode: MODE,
+        created_at: new Date().toISOString(), // Explicitly add created_at if table doesn't default it
       });
 
       console.log(`✅ Synced ${variantName} → Stripe price ${stripePrice.id}`);
@@ -128,22 +129,22 @@ async function sync() {
     return;
   }
 
-  // Insert into Supabase (without Prefer header)
   const supabaseRes = await fetch(`${SUPABASE_URL}/rest/v1/variant_mappings`, {
     method: "POST",
     headers: {
       apikey: SUPABASE_SERVICE_ROLE_KEY,
       Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
       "Content-Type": "application/json",
+      Prefer: "resolution=merge-duplicates",
     },
     body: JSON.stringify(insertMappings),
   });
 
-  const responseText = await supabaseRes.text();
-  console.log("📦 Supabase response:", responseText);
+  const supabaseText = await supabaseRes.text();
+  console.log("📝 Supabase response:", supabaseText);
 
   if (!supabaseRes.ok) {
-    throw new Error(`❌ Failed to insert into Supabase: ${responseText}`);
+    throw new Error(`❌ Failed to insert into Supabase: ${supabaseText}`);
   }
 
   console.log(`🎉 Synced ${insertMappings.length} variants into Supabase successfully`);
