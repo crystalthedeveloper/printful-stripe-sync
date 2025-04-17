@@ -15,34 +15,33 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
 const MODE = "live";
 
-// Gets the main image URL from Printful variant
+// Gets the main image URL from Printful store variant
 async function getPrintfulImageURL(variantId) {
   try {
-    const res = await fetch(`https://api.printful.com/products/variant/${variantId}`, {
+    const res = await fetch(`https://api.printful.com/store/variants/${variantId}`, {
       headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
     });
 
     if (!res.ok) return null;
 
     const data = await res.json();
-    const file = data.result?.files?.find(f => f.type === "preview" || f.type === "default");
-    return file?.url ?? null;
+    return data.result?.files?.[0]?.preview_url || null;
   } catch {
     return null;
   }
 }
 
-// Validates a Printful variant (exists and has metadata)
+// Validates a Printful store variant (exists)
 async function isValidPrintfulVariant(variantId) {
   try {
-    const res = await fetch(`https://api.printful.com/products/variant/${variantId}`, {
-      headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` }
+    const res = await fetch(`https://api.printful.com/store/variants/${variantId}`, {
+      headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
     });
 
     if (!res.ok || res.status === 404) return false;
 
     const data = await res.json();
-    return !!data.result?.variant_id;
+    return !!data.result?.id;
   } catch {
     return false;
   }
@@ -53,7 +52,7 @@ async function sync() {
   console.log("🔄 Starting Printful to Stripe & Supabase sync...");
 
   const productRes = await fetch("https://api.printful.com/sync/products", {
-    headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` }
+    headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
   });
 
   const productList = (await productRes.json()).result;
@@ -61,7 +60,7 @@ async function sync() {
 
   for (const product of productList) {
     const detailRes = await fetch(`https://api.printful.com/sync/products/${product.id}`, {
-      headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` }
+      headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
     });
 
     const detailData = await detailRes.json();
@@ -77,7 +76,7 @@ async function sync() {
         retail_price,
         is_ignored,
         is_deleted,
-        options
+        options,
       } = variant;
 
       console.log(`🔍 Checking variant ${variantName} (${printful_variant_id})`);
@@ -94,20 +93,20 @@ async function sync() {
       }
 
       const stripeProduct = await stripe.products.create({
-        name: `${productName} - ${variantName}`
+        name: `${productName} - ${variantName}`,
       });
 
       const stripePrice = await stripe.prices.create({
         product: stripeProduct.id,
         unit_amount: Math.round(parseFloat(retail_price) * 100),
-        currency: "cad"
+        currency: "cad",
       });
 
       const imageUrl = await getPrintfulImageURL(printful_variant_id);
       if (!imageUrl) console.warn(`⚠️ No image found for ${printful_variant_id}`);
 
-      const color = options?.find(o => o.id === "color")?.value || "";
-      const size = options?.find(o => o.id === "size")?.value || "";
+      const color = options?.find((o) => o.id === "color")?.value || "";
+      const size = options?.find((o) => o.id === "size")?.value || "";
 
       insertMappings.push({
         printful_variant_id: printful_variant_id.toString(),
@@ -117,7 +116,7 @@ async function sync() {
         color,
         size,
         variant_name: variantName,
-        mode: MODE
+        mode: MODE,
       });
 
       console.log(`✅ Synced ${variantName} → Stripe price ${stripePrice.id}`);
@@ -136,9 +135,9 @@ async function sync() {
       apikey: SUPABASE_SERVICE_ROLE_KEY,
       Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
       "Content-Type": "application/json",
-      Prefer: "resolution=merge-duplicates"
+      Prefer: "resolution=merge-duplicates",
     },
-    body: JSON.stringify(insertMappings)
+    body: JSON.stringify(insertMappings),
   });
 
   if (!supabaseRes.ok) {
@@ -149,5 +148,4 @@ async function sync() {
   console.log(`🎉 Synced ${insertMappings.length} variants into Supabase successfully`);
 }
 
-// Run it
 sync();
