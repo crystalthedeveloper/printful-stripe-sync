@@ -128,21 +128,22 @@ async function sync() {
     return;
   }
 
-  // Insert into Supabase
+  // Insert into Supabase (without Prefer header)
   const supabaseRes = await fetch(`${SUPABASE_URL}/rest/v1/variant_mappings`, {
     method: "POST",
     headers: {
       apikey: SUPABASE_SERVICE_ROLE_KEY,
       Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
       "Content-Type": "application/json",
-      Prefer: "resolution=merge-duplicates",
     },
     body: JSON.stringify(insertMappings),
   });
 
+  const responseText = await supabaseRes.text();
+  console.log("📦 Supabase response:", responseText);
+
   if (!supabaseRes.ok) {
-    const error = await supabaseRes.text();
-    throw new Error(`❌ Failed to insert into Supabase: ${error}`);
+    throw new Error(`❌ Failed to insert into Supabase: ${responseText}`);
   }
 
   console.log(`🎉 Synced ${insertMappings.length} variants into Supabase successfully`);
