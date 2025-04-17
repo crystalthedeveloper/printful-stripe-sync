@@ -6,13 +6,13 @@ import Stripe from "stripe";
 import fetch from "node-fetch";
 dotenv.config();
 
-const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || process.env.STRIPE_SECRET_TEST;
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const PRINTFUL_API_KEY = process.env.PRINTFUL_API_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
-const MODE = STRIPE_SECRET_KEY.startsWith("sk_test") ? "test" : "live";
+const MODE = "live"; // Hardcoded to live since Printful has no test mode
 
 async function getPrintfulImageURL(variantId) {
   const res = await fetch(`https://api.printful.com/products/variant/${variantId}`, {
@@ -36,7 +36,8 @@ async function isValidPrintfulVariant(variantId) {
 
     const data = await res.json();
     return !!(data.result?.variant_id && data.result?.files?.length > 0);
-  } catch {
+  } catch (err) {
+    console.error(`❌ Error checking variant ${variantId}:`, err.message);
     return false;
   }
 }
@@ -70,7 +71,23 @@ async function sync() {
         options
       } = variant;
 
-      if (is_deleted || is_ignored || !(await isValidPrintfulVariant(printful_variant_id))) continue;
+      console.log(`🔍 Checking variant ${variantName} (${printful_variant_id})`);
+
+      if (is_deleted) {
+        console.log(`🚫 Skipped ${printful_variant_id} - deleted`);
+        continue;
+      }
+
+      if (is_ignored) {
+        console.log(`🚫 Skipped ${printful_variant_id} - ignored`);
+        continue;
+      }
+
+      const valid = await isValidPrintfulVariant(printful_variant_id);
+      if (!valid) {
+        console.log(`🚫 Skipped ${printful_variant_id} - invalid (no image or 404)`);
+        continue;
+      }
 
       const stripeProduct = await stripe.products.create({
         name: `${productName} - ${variantName}`
@@ -83,8 +100,9 @@ async function sync() {
       });
 
       const imageUrl = await getPrintfulImageURL(printful_variant_id);
-      const color = options?.find(o => o.id === "color")?.value || "";
-      const size = options?.find(o => o.id === "size")?.value || "";
+      const safeOptions = Array.isArray(options) ? options : [];
+      const color = safeOptions.find(o => o.id === "color")?.value || "";
+      const size = safeOptions.find(o => o.id === "size")?.value || "";
 
       insertMappings.push({
         printful_variant_id: printful_variant_id.toString(),
