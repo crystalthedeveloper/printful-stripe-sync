@@ -1,17 +1,19 @@
 // clean-broken-mappings.js
-// This script removes broken Printful variant mappings from Supabase
-// A variant is considered broken if it returns 404 or lacks image files from Printful
+// Safely removes broken Printful variant mappings from Supabase
+// Broken = 404 from Printful OR missing image files
 
 import dotenv from "dotenv";
 import fetch from "node-fetch";
 dotenv.config();
 
-// Load environment variables
+// ENV
 const PRINTFUL_API_KEY = process.env.PRINTFUL_API_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const DRY_RUN = process.env.DRY_RUN === "true"; // prevent deletion if true
+const delayMs = 200; // Optional delay between API calls
 
-// Check if a Printful variant is still valid (exists and has image files)
+// Utility: check if Printful variant still exists and has image
 async function variantStillValid(variantId) {
   try {
     const res = await fetch(`https://api.printful.com/products/variant/${variantId}`, {
@@ -58,6 +60,7 @@ async function cleanBrokenMappings() {
       console.warn(`🗑️ Marking for deletion: ${printful_variant_id}`);
       toDelete.push(printful_variant_id);
     }
+    await new Promise(resolve => setTimeout(resolve, delayMs)); // Avoid hitting rate limits
   }
 
   if (toDelete.length === 0) {
@@ -65,18 +68,29 @@ async function cleanBrokenMappings() {
     return;
   }
 
-  for (const id of toDelete) {
-    await fetch(`${SUPABASE_URL}/rest/v1/variant_mappings?printful_variant_id=eq.${id}`, {
+  if (DRY_RUN) {
+    console.log(`🔍 DRY RUN: Would have deleted ${toDelete.length} broken mappings`);
+    console.table(toDelete);
+    return;
+  }
+
+  console.log(`🧹 Deleting ${toDelete.length} broken mappings from Supabase...`);
+
+  const deleteResults = await Promise.allSettled(toDelete.map(id =>
+    fetch(`${SUPABASE_URL}/rest/v1/variant_mappings?printful_variant_id=eq.${id}`, {
       method: "DELETE",
       headers: {
         apikey: SUPABASE_SERVICE_ROLE_KEY,
         Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`
       }
-    });
-  }
+    })
+  ));
 
-  console.log(`🧹 Deleted ${toDelete.length} broken mappings from Supabase.`);
+  const successCount = deleteResults.filter(r => r.status === "fulfilled").length;
+  const failedCount = deleteResults.length - successCount;
+
+  console.log(`✅ Deleted ${successCount} variants. ❌ Failed: ${failedCount}`);
 }
 
-// Run the cleaner
+// Run it
 cleanBrokenMappings();
