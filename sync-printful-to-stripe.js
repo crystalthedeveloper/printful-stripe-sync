@@ -1,5 +1,5 @@
 // sync-printful-to-stripe.js
-// Syncs valid Printful variants to Stripe and stores the mapping in Supabase with full metadata
+// Syncs Printful variants to Stripe and Supabase (even if missing image)
 
 import dotenv from "dotenv";
 import Stripe from "stripe";
@@ -12,7 +12,7 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
-const MODE = "live"; // Hardcoded to live since Printful has no test mode
+const MODE = "live";
 
 async function getPrintfulImageURL(variantId) {
   const res = await fetch(`https://api.printful.com/products/variant/${variantId}`, {
@@ -35,9 +35,8 @@ async function isValidPrintfulVariant(variantId) {
     if (res.status === 404 || !res.ok) return false;
 
     const data = await res.json();
-    return !!(data.result?.variant_id && data.result?.files?.length > 0);
-  } catch (err) {
-    console.error(`❌ Error checking variant ${variantId}:`, err.message);
+    return !!data.result?.variant_id;
+  } catch {
     return false;
   }
 }
@@ -73,19 +72,14 @@ async function sync() {
 
       console.log(`🔍 Checking variant ${variantName} (${printful_variant_id})`);
 
-      if (is_deleted) {
-        console.log(`🚫 Skipped ${printful_variant_id} - deleted`);
-        continue;
-      }
-
-      if (is_ignored) {
-        console.log(`🚫 Skipped ${printful_variant_id} - ignored`);
+      if (is_deleted || is_ignored) {
+        console.log(`🚫 Skipped ${printful_variant_id} - deleted or ignored`);
         continue;
       }
 
       const valid = await isValidPrintfulVariant(printful_variant_id);
       if (!valid) {
-        console.log(`🚫 Skipped ${printful_variant_id} - invalid (no image or 404)`);
+        console.log(`🚫 Skipped ${printful_variant_id} - 404 or invalid`);
         continue;
       }
 
@@ -100,9 +94,10 @@ async function sync() {
       });
 
       const imageUrl = await getPrintfulImageURL(printful_variant_id);
-      const safeOptions = Array.isArray(options) ? options : [];
-      const color = safeOptions.find(o => o.id === "color")?.value || "";
-      const size = safeOptions.find(o => o.id === "size")?.value || "";
+      if (!imageUrl) console.warn(`⚠️ No image found for variant ${printful_variant_id}`);
+
+      const color = options?.find(o => o.id === "color")?.value || "";
+      const size = options?.find(o => o.id === "size")?.value || "";
 
       insertMappings.push({
         printful_variant_id: printful_variant_id.toString(),
@@ -115,7 +110,7 @@ async function sync() {
         mode: MODE
       });
 
-      console.log(`✅ Synced ${variantName} → Stripe price ${stripePrice.id} [${MODE}]`);
+      console.log(`✅ Synced ${variantName} → Stripe price ${stripePrice.id}`);
     }
   }
 
@@ -124,7 +119,7 @@ async function sync() {
     return;
   }
 
-  const supabaseRes = await fetch(`${SUPABASE_URL}/rest/v1/variant_mappings?on_conflict=printful_variant_id,stripe_price_id,mode`, {
+  const supabaseRes = await fetch(`${SUPABASE_URL}/rest/v1/variant_mappings`, {
     method: "POST",
     headers: {
       apikey: SUPABASE_SERVICE_ROLE_KEY,
