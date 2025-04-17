@@ -11,6 +11,7 @@ const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const PRINTFUL_API_KEY = process.env.PRINTFUL_API_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const DRY_RUN = process.env.DRY_RUN === "true"; // optional dry run mode
 
 const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
 const MODE = "live";
@@ -21,12 +22,11 @@ async function getPrintfulImageURL(variantId) {
     const res = await fetch(`https://api.printful.com/store/variants/${variantId}`, {
       headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
     });
-
     if (!res.ok) return null;
-
     const data = await res.json();
     return data.result?.files?.[0]?.preview_url || null;
-  } catch {
+  } catch (err) {
+    console.warn(`⚠️ Failed to get image for ${variantId}: ${err.message}`);
     return null;
   }
 }
@@ -47,7 +47,7 @@ async function isValidPrintfulVariant(variantId) {
   }
 }
 
-// Main sync function
+// Sync function
 async function sync() {
   console.log("🔄 Starting Printful to Stripe & Supabase sync...");
 
@@ -92,15 +92,21 @@ async function sync() {
         continue;
       }
 
-      const stripeProduct = await stripe.products.create({
-        name: `${productName} - ${variantName}`,
-      });
+      let stripeProduct, stripePrice;
+      try {
+        stripeProduct = await stripe.products.create({
+          name: `${productName} - ${variantName}`,
+        });
 
-      const stripePrice = await stripe.prices.create({
-        product: stripeProduct.id,
-        unit_amount: Math.round(parseFloat(retail_price) * 100),
-        currency: "cad",
-      });
+        stripePrice = await stripe.prices.create({
+          product: stripeProduct.id,
+          unit_amount: Math.round(parseFloat(retail_price) * 100),
+          currency: "cad",
+        });
+      } catch (err) {
+        console.error(`❌ Stripe error for variant ${printful_variant_id}:`, err.message);
+        continue;
+      }
 
       const imageUrl = await getPrintfulImageURL(printful_variant_id);
       if (!imageUrl) console.warn(`⚠️ No image found for ${printful_variant_id}`);
@@ -117,7 +123,7 @@ async function sync() {
         size,
         variant_name: variantName,
         mode: MODE,
-        created_at: new Date().toISOString(), // Explicitly add created_at if table doesn't default it
+        created_at: new Date().toISOString(),
       });
 
       console.log(`✅ Synced ${variantName} → Stripe price ${stripePrice.id}`);
@@ -129,25 +135,39 @@ async function sync() {
     return;
   }
 
-  const supabaseRes = await fetch(`${SUPABASE_URL}/rest/v1/variant_mappings`, {
-    method: "POST",
-    headers: {
-      apikey: SUPABASE_SERVICE_ROLE_KEY,
-      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-      "Content-Type": "application/json",
-      Prefer: "resolution=merge-duplicates",
-    },
-    body: JSON.stringify(insertMappings),
-  });
-
-  const supabaseText = await supabaseRes.text();
-  console.log("📝 Supabase response:", supabaseText);
-
-  if (!supabaseRes.ok) {
-    throw new Error(`❌ Failed to insert into Supabase: ${supabaseText}`);
+  if (DRY_RUN) {
+    console.log("🧪 DRY RUN enabled — skipping Supabase insert.");
+    console.table(insertMappings.map(v => ({
+      variant: v.variant_name,
+      stripe_price_id: v.stripe_price_id,
+      price: v.retail_price
+    })));
+    return;
   }
 
-  console.log(`🎉 Synced ${insertMappings.length} variants into Supabase successfully`);
+  try {
+    const supabaseRes = await fetch(`${SUPABASE_URL}/rest/v1/variant_mappings`, {
+      method: "POST",
+      headers: {
+        apikey: SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        "Content-Type": "application/json",
+        Prefer: "resolution=merge-duplicates",
+      },
+      body: JSON.stringify(insertMappings),
+    });
+
+    const supabaseText = await supabaseRes.text();
+    console.log("📝 Supabase response:", supabaseText);
+
+    if (!supabaseRes.ok) {
+      throw new Error(`❌ Failed to insert into Supabase: ${supabaseText}`);
+    }
+
+    console.log(`🎉 Synced ${insertMappings.length} variants into Supabase successfully`);
+  } catch (err) {
+    console.error("❌ Supabase insert failed:", err.message);
+  }
 }
 
 sync();
