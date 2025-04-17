@@ -1,17 +1,18 @@
 // sync-printful-to-stripe.js
-// Syncs valid Printful variants to Stripe and stores the mapping in Supabase
+// Syncs valid Printful variants to Stripe and stores the mapping in Supabase with mode support
 
 import dotenv from "dotenv";
 import Stripe from "stripe";
 import fetch from "node-fetch";
 dotenv.config();
 
-const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || process.env.STRIPE_SECRET_TEST;
 const PRINTFUL_API_KEY = process.env.PRINTFUL_API_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
+const MODE = STRIPE_SECRET_KEY.startsWith("sk_test") ? "test" : "live";
 
 async function isValidPrintfulVariant(variantId) {
   const res = await fetch(`https://api.printful.com/products/variant/${variantId}`, {
@@ -97,10 +98,11 @@ async function sync() {
         insertMappings.push({
           printful_variant_id: printful_variant_id.toString(),
           stripe_price_id: stripePrice.id,
-          retail_price: parseFloat(retail_price)
+          retail_price: parseFloat(retail_price),
+          mode: MODE
         });
 
-        console.log(`✅ Synced variant ${printful_variant_id} → Stripe price ${stripePrice.id}`);
+        console.log(`✅ Synced variant ${printful_variant_id} → Stripe price ${stripePrice.id} (${MODE})`);
       }
     }
 
@@ -109,7 +111,7 @@ async function sync() {
       return;
     }
 
-    const supabaseRes = await fetch(`${SUPABASE_URL}/rest/v1/variant_mappings?on_conflict=printful_variant_id`, {
+    const supabaseRes = await fetch(`${SUPABASE_URL}/rest/v1/variant_mappings?on_conflict=printful_variant_id,stripe_price_id,mode`, {
       method: "POST",
       headers: {
         apikey: SUPABASE_SERVICE_ROLE_KEY,
@@ -125,7 +127,7 @@ async function sync() {
       throw new Error(`❌ Failed to insert mappings into Supabase: ${error}`);
     }
 
-    console.log("🎉 Successfully synced Printful variants to Stripe and Supabase");
+    console.log(`🎉 Synced ${insertMappings.length} Printful variants to Stripe [${MODE}] and saved to Supabase`);
   } catch (err) {
     console.error("❌ Sync error:", err.message);
     process.exit(1);
