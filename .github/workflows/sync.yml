@@ -1,12 +1,12 @@
-name: Sync Printful to Stripe
+name: Sync Printful to Stripe & Clean Broken Mappings
 
 on:
   schedule:
-    - cron: '0 6 * * *' # Runs daily at 6 AM UTC
-  workflow_dispatch:    # Also allows manual run
+    - cron: '0 6 * * *'  # Daily at 6 AM UTC
+  workflow_dispatch:     # Manual trigger
 
 jobs:
-  sync:
+  sync-and-clean:
     runs-on: ubuntu-latest
 
     steps:
@@ -28,3 +28,10 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node sync-printful-to-stripe.js
+
+      - name: Run clean script
+        env:
+          PRINTFUL_API_KEY: ${{ secrets.PRINTFUL_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node clean-broken-mappings.js

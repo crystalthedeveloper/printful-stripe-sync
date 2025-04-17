@@ -14,15 +14,29 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
 const MODE = STRIPE_SECRET_KEY.startsWith("sk_test") ? "test" : "live";
 
+// ✅ Check that the variant exists AND has at least one file (e.g. mockup or design)
 async function isValidPrintfulVariant(variantId) {
-  const res = await fetch(`https://api.printful.com/products/variant/${variantId}`, {
-    headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` }
-  });
+  try {
+    const res = await fetch(`https://api.printful.com/products/variant/${variantId}`, {
+      headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` }
+    });
 
-  if (!res.ok) return false;
+    if (res.status === 404) {
+      console.warn(`❌ Variant ${variantId} not found (404)`);
+      return false;
+    }
 
-  const data = await res.json();
-  return !!(data.result?.variant_id && data.result?.files?.length > 0);
+    if (!res.ok) {
+      console.warn(`⚠️ Error fetching variant ${variantId}: ${res.statusText}`);
+      return false;
+    }
+
+    const data = await res.json();
+    return !!(data.result?.variant_id && data.result?.files?.length > 0);
+  } catch (err) {
+    console.error(`❌ Failed to validate variant ${variantId}:`, err.message);
+    return false;
+  }
 }
 
 async function sync() {
@@ -80,6 +94,7 @@ async function sync() {
           is_deleted
         } = variant;
 
+        // ✅ Skip variants that are deleted, ignored, or fail the Printful file check
         if (is_deleted || is_ignored || !(await isValidPrintfulVariant(printful_variant_id))) {
           console.warn(`❌ Skipping invalid or deleted variant ${printful_variant_id}`);
           continue;

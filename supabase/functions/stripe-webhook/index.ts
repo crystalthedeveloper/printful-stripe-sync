@@ -51,18 +51,25 @@ async function getPrintfulImageURL(variantId: number): Promise<string | null> {
 }
 
 async function getMappedVariantId(stripePriceId: string): Promise<number | null> {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/variant_mappings?stripe_price_id=eq.${stripePriceId}`, {
-    headers: {
-      apikey: SUPABASE_SERVICE_ROLE_KEY!,
-      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-      Accept: "application/json",
-    },
-  });
+  const mode = stripePriceId.startsWith("price_1") ? "live" : "test";
+
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/variant_mappings?stripe_price_id=eq.${stripePriceId}&mode=eq.${mode}`,
+    {
+      headers: {
+        apikey: SUPABASE_SERVICE_ROLE_KEY!,
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        Accept: "application/json",
+      },
+    }
+  );
+
   const data = await res.json();
   if (!res.ok || !Array.isArray(data) || data.length === 0) {
-    console.error("❌ No mapping found for Stripe price ID:", stripePriceId);
+    console.error(`❌ No ${mode} mapping found for Stripe price ID:`, stripePriceId);
     return null;
   }
+
   return Number(data[0].printful_variant_id);
 }
 
