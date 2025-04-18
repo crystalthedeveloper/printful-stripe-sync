@@ -47,7 +47,7 @@ async function isValidPrintfulVariant(variantId) {
   }
 }
 
-// Sync function
+// Main sync function
 async function sync() {
   console.log("🔄 Starting Printful to Stripe & Supabase sync...");
 
@@ -146,13 +146,15 @@ async function sync() {
   }
 
   try {
+    console.log("📦 Inserting into Supabase:", JSON.stringify(insertMappings, null, 2));
+
     const supabaseRes = await fetch(`${SUPABASE_URL}/rest/v1/variant_mappings`, {
       method: "POST",
       headers: {
         apikey: SUPABASE_SERVICE_ROLE_KEY,
         Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
         "Content-Type": "application/json",
-        Prefer: "resolution=merge-duplicates",
+        Prefer: "return=representation",
       },
       body: JSON.stringify(insertMappings),
     });
