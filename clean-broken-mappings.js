@@ -1,5 +1,5 @@
 // clean-broken-mappings.js
-// Safely removes only broken Printful variant mappings from Supabase (404 or no image)
+// Safely removes only broken Printful store variant mappings from Supabase (404 or no image)
 
 import dotenv from "dotenv";
 import fetch from "node-fetch";
@@ -12,10 +12,10 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const DRY_RUN = process.env.DRY_RUN === "true";
 const delayMs = 200;
 
-// Check if Printful variant is valid (exists and has preview image)
+// Check if Printful store variant is valid (exists and has preview image)
 async function variantStillValid(variantId) {
   try {
-    const res = await fetch(`https://api.printful.com/products/variant/${variantId}`, {
+    const res = await fetch(`https://api.printful.com/store/variants/${variantId}`, {
       headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` }
     });
 
@@ -26,7 +26,7 @@ async function variantStillValid(variantId) {
     }
 
     const data = await res.json();
-    return !!(data.result?.variant_id && data.result?.files?.length > 0);
+    return !!(data.result?.id && data.result?.files?.length > 0);
   } catch (err) {
     console.error(`❌ Network error for variant ${variantId}:`, err.message);
     return false;
