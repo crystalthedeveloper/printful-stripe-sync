@@ -11,28 +11,51 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const DRY_RUN = process.env.DRY_RUN === "true";
 const delayMs = 200;
 
-// ✅ Checks if Printful variant exists and includes a valid 'preview' mockup image
-async function isValidVariant(variantId) {
+// ✅ Finds the productId that contains this variantId
+async function getProductIdFromVariantId(variantId) {
   try {
-    const res = await fetch(`https://api.printful.com/sync/variant/${variantId}`, {
-      headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` }
+    const res = await fetch(`https://api.printful.com/sync/products`, {
+      headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
     });
 
-    if (res.status === 404) return false;
-    if (!res.ok) {
-      console.warn(`⚠️ API error on ${variantId}: ${res.statusText}`);
-      return false;
+    if (!res.ok) return null;
+    const data = await res.json();
+
+    for (const product of data.result) {
+      const detailRes = await fetch(`https://api.printful.com/sync/products/${product.id}`, {
+        headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
+      });
+
+      if (!detailRes.ok) continue;
+
+      const detailData = await detailRes.json();
+      const found = detailData.result?.sync_variants?.find(v => v.id === parseInt(variantId));
+
+      if (found) return { productId: product.id, variant: found };
     }
 
-    const data = await res.json();
-    const mockup = data.result?.files?.find(f => f.type === "preview");
-    return !!(data.result?.id && mockup?.preview_url);
+    return null;
   } catch (err) {
-    console.error(`❌ Network error on ${variantId}:`, err.message);
+    console.warn(`⚠️ Failed to find product for variant ${variantId}: ${err.message}`);
+    return null;
+  }
+}
+
+// ✅ Checks if the variant exists and has a valid preview image
+async function isValidVariant(variantId) {
+  try {
+    const info = await getProductIdFromVariantId(variantId);
+    if (!info) return false;
+
+    const preview = info.variant?.files?.find(f => f.type === "preview");
+    return !!(info.variant?.id && preview?.preview_url);
+  } catch (err) {
+    console.error(`❌ Error validating variant ${variantId}:`, err.message);
     return false;
   }
 }
 
+// 🔍 Cleans broken records from Supabase
 async function cleanBrokenMappings() {
   console.log("🧹 Starting variant validation...");
 

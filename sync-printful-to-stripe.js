@@ -15,7 +15,7 @@ const MODE = "live";
 
 const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
 
-// ✅ Get mockup image from sync/products/:productId instead of variant
+// ✅ Get mockup image from the sync product endpoint
 async function getPrintfulImageURLFromProduct(productId, variantId) {
   try {
     const res = await fetch(`https://api.printful.com/sync/products/${productId}`, {
@@ -24,7 +24,6 @@ async function getPrintfulImageURLFromProduct(productId, variantId) {
 
     if (!res.ok) return null;
     const data = await res.json();
-
     const variant = data.result?.sync_variants?.find(v => v.id === variantId);
     const image = variant?.files?.find(f => f.type === "preview");
 
@@ -35,7 +34,7 @@ async function getPrintfulImageURLFromProduct(productId, variantId) {
   }
 }
 
-// ✅ Check if variant exists
+// ✅ Confirm variant exists
 async function isValidPrintfulVariant(variantId) {
   try {
     const res = await fetch(`https://api.printful.com/store/variants/${variantId}`, {
