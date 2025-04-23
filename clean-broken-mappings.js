@@ -11,7 +11,7 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const DRY_RUN = process.env.DRY_RUN === "true";
 const delayMs = 200;
 
-// ✅ Checks if Printful variant exists and includes a 'preview' (mockup) image
+// ✅ Checks if Printful variant exists and includes a valid 'preview' mockup image
 async function isValidVariant(variantId) {
   try {
     const res = await fetch(`https://api.printful.com/sync/variant/${variantId}`, {
@@ -25,8 +25,8 @@ async function isValidVariant(variantId) {
     }
 
     const data = await res.json();
-    const preview = data.result?.files?.find(f => f.type === "preview");
-    return !!(data.result?.id && preview?.preview_url);
+    const mockup = data.result?.files?.find(f => f.type === "preview");
+    return !!(data.result?.id && mockup?.preview_url);
   } catch (err) {
     console.error(`❌ Network error on ${variantId}:`, err.message);
     return false;
@@ -45,7 +45,7 @@ async function cleanBrokenMappings() {
 
   if (!fetchRes.ok) {
     const error = await fetchRes.text();
-    console.error("❌ Failed to fetch mappings:", error);
+    console.error("❌ Failed to fetch mappings from Supabase:", error);
     return;
   }
 
@@ -58,7 +58,7 @@ async function cleanBrokenMappings() {
       console.warn(`🗑️ Invalid: ${printful_variant_id}`);
       toDelete.push(printful_variant_id);
     }
-    await new Promise(res => setTimeout(res, delayMs));
+    await new Promise(res => setTimeout(res, delayMs)); // avoid rate limits
   }
 
   if (toDelete.length === 0) {
@@ -67,7 +67,7 @@ async function cleanBrokenMappings() {
   }
 
   if (DRY_RUN) {
-    console.log("🚫 DRY RUN — these would be deleted:");
+    console.log("🚫 DRY RUN — would delete these variants:");
     console.table(toDelete.map(id => ({ printful_variant_id: id })));
     return;
   }
@@ -89,7 +89,7 @@ async function cleanBrokenMappings() {
   const success = results.filter(r => r.status === "fulfilled").length;
   const failed = results.length - success;
 
-  console.log(`✅ Deleted ${success} mappings. ❌ Failed: ${failed}`);
+  console.log(`✅ Deleted ${success} mappings. ❌ Failed to delete: ${failed}`);
 }
 
 cleanBrokenMappings();

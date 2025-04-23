@@ -15,24 +15,27 @@ const MODE = "live";
 
 const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
 
-// ✅ Get mockup image from Printful sync variant
-async function getPrintfulImageURL(variantId) {
+// ✅ Get mockup image from sync/products/:productId instead of variant
+async function getPrintfulImageURLFromProduct(productId, variantId) {
   try {
-    const res = await fetch(`https://api.printful.com/sync/variant/${variantId}`, {
+    const res = await fetch(`https://api.printful.com/sync/products/${productId}`, {
       headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
     });
 
     if (!res.ok) return null;
     const data = await res.json();
-    const mockup = data.result?.files?.find(f => f.type === "preview");
-    return mockup?.preview_url || null;
+
+    const variant = data.result?.sync_variants?.find(v => v.id === variantId);
+    const image = variant?.files?.find(f => f.type === "preview");
+
+    return image?.preview_url || null;
   } catch (err) {
-    console.warn(`⚠️ Failed to get mockup image for ${variantId}: ${err.message}`);
+    console.warn(`⚠️ Could not fetch image for variant ${variantId}: ${err.message}`);
     return null;
   }
 }
 
-// ✅ Check if variant exists in Printful
+// ✅ Check if variant exists
 async function isValidPrintfulVariant(variantId) {
   try {
     const res = await fetch(`https://api.printful.com/store/variants/${variantId}`, {
@@ -107,7 +110,7 @@ async function sync() {
         continue;
       }
 
-      const imageUrl = await getPrintfulImageURL(printful_variant_id);
+      const imageUrl = await getPrintfulImageURLFromProduct(product.id, printful_variant_id);
       if (!imageUrl) console.warn(`⚠️ No image found for ${printful_variant_id}`);
 
       const color = options?.find(o => o.id === "color")?.value || "";
