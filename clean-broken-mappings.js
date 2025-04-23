@@ -1,21 +1,20 @@
 // clean-broken-mappings.js
-// Safely removes only broken Printful store variant mappings from Supabase (404 or no image)
+// Removes only broken Printful variant mappings from Supabase (404 or missing mockup image)
 
 import dotenv from "dotenv";
 import fetch from "node-fetch";
 dotenv.config();
 
-// ENV setup
 const PRINTFUL_API_KEY = process.env.PRINTFUL_API_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const DRY_RUN = process.env.DRY_RUN === "true";
 const delayMs = 200;
 
-// Checks if the variant exists and includes a 'mockup' image
+// ✅ Checks if Printful variant exists and includes a 'preview' (mockup) image
 async function isValidVariant(variantId) {
   try {
-    const res = await fetch(`https://api.printful.com/store/variants/${variantId}`, {
+    const res = await fetch(`https://api.printful.com/sync/variant/${variantId}`, {
       headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` }
     });
 
@@ -26,15 +25,14 @@ async function isValidVariant(variantId) {
     }
 
     const data = await res.json();
-    const mockupFile = data.result?.files?.find(f => f.type === "mockup");
-    return !!(data.result?.id && mockupFile?.preview_url);
+    const preview = data.result?.files?.find(f => f.type === "preview");
+    return !!(data.result?.id && preview?.preview_url);
   } catch (err) {
     console.error(`❌ Network error on ${variantId}:`, err.message);
     return false;
   }
 }
 
-// Main cleaning function
 async function cleanBrokenMappings() {
   console.log("🧹 Starting variant validation...");
 
@@ -64,17 +62,17 @@ async function cleanBrokenMappings() {
   }
 
   if (toDelete.length === 0) {
-    console.log("✅ All variants valid. No deletions needed.");
+    console.log("✅ All variants are valid. No deletions needed.");
     return;
   }
 
   if (DRY_RUN) {
-    console.log("🚫 DRY RUN — would delete these:");
+    console.log("🚫 DRY RUN — these would be deleted:");
     console.table(toDelete.map(id => ({ printful_variant_id: id })));
     return;
   }
 
-  console.log(`🧹 Deleting ${toDelete.length} broken variants...`);
+  console.log(`🧹 Deleting ${toDelete.length} broken variants from Supabase...`);
 
   const results = await Promise.allSettled(
     toDelete.map(id =>

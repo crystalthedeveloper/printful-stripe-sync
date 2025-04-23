@@ -1,49 +1,47 @@
 // sync-printful-to-stripe.js
-// Syncs live Printful variants to Stripe and Supabase with full metadata (image optional)
+// Syncs live Printful variants to Stripe and Supabase with full metadata (uses mockup image)
 
 import dotenv from "dotenv";
 import Stripe from "stripe";
 import fetch from "node-fetch";
 dotenv.config();
 
+// Environment variables
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const PRINTFUL_API_KEY = process.env.PRINTFUL_API_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const DRY_RUN = process.env.DRY_RUN === "true";
-
-const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
 const MODE = "live";
 
-// ✅ Get the product mockup image (not embroidery preview)
+const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
+
+// ✅ Get mockup image from the sync variant endpoint (not embroidery preview)
 async function getPrintfulImageURL(variantId) {
   try {
-    const res = await fetch(`https://api.printful.com/store/variants/${variantId}`, {
+    const res = await fetch(`https://api.printful.com/sync/variant/${variantId}`, {
       headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
     });
 
     if (!res.ok) return null;
     const data = await res.json();
 
-    // Use the file with type 'mockup' if available
-    const mockupFile = data.result?.files?.find(f => f.type === "mockup");
-    const fallback = data.result?.files?.[0];
-
-    return mockupFile?.preview_url || fallback?.preview_url || null;
+    // Look for mockup image
+    const mockup = data.result?.files?.find(f => f.type === "preview");
+    return mockup?.preview_url || null;
   } catch (err) {
-    console.warn(`⚠️ Failed to get image for ${variantId}: ${err.message}`);
+    console.warn(`⚠️ Failed to get mockup image for ${variantId}: ${err.message}`);
     return null;
   }
 }
 
+// ✅ Check if variant is valid (exists)
 async function isValidPrintfulVariant(variantId) {
   try {
     const res = await fetch(`https://api.printful.com/store/variants/${variantId}`, {
       headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
     });
-
     if (!res.ok || res.status === 404) return false;
-
     const data = await res.json();
     return !!data.result?.id;
   } catch {
@@ -95,6 +93,7 @@ async function sync() {
         continue;
       }
 
+      // Create product and price in Stripe
       let stripeProduct, stripePrice;
       try {
         stripeProduct = await stripe.products.create({
@@ -111,11 +110,14 @@ async function sync() {
         continue;
       }
 
+      // Get image (prefer preview/mockup)
       const imageUrl = await getPrintfulImageURL(printful_variant_id);
-      if (!imageUrl) console.warn(`⚠️ No image found for ${printful_variant_id}`);
+      if (!imageUrl) {
+        console.warn(`⚠️ No image found for ${printful_variant_id}`);
+      }
 
-      const color = options?.find((o) => o.id === "color")?.value || "";
-      const size = options?.find((o) => o.id === "size")?.value || "";
+      const color = options?.find(o => o.id === "color")?.value || "";
+      const size = options?.find(o => o.id === "size")?.value || "";
 
       insertMappings.push({
         printful_variant_id: printful_variant_id.toString(),
@@ -143,7 +145,8 @@ async function sync() {
     console.table(insertMappings.map(v => ({
       variant: v.variant_name,
       stripe_price_id: v.stripe_price_id,
-      price: v.retail_price
+      price: v.retail_price,
+      image_url: v.image_url,
     })));
     return;
   }
