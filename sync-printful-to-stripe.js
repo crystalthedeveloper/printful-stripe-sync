@@ -1,12 +1,11 @@
 // sync-printful-to-stripe.js
-// Syncs live Printful variants to Stripe and Supabase with full metadata (uses mockup image)
+// Syncs Printful variants to Stripe and Supabase with mockup image support
 
 import dotenv from "dotenv";
 import Stripe from "stripe";
 import fetch from "node-fetch";
 dotenv.config();
 
-// Environment variables
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const PRINTFUL_API_KEY = process.env.PRINTFUL_API_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -16,7 +15,7 @@ const MODE = "live";
 
 const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
 
-// ✅ Get mockup image from the sync variant endpoint (not embroidery preview)
+// ✅ Get mockup image from Printful sync variant
 async function getPrintfulImageURL(variantId) {
   try {
     const res = await fetch(`https://api.printful.com/sync/variant/${variantId}`, {
@@ -25,8 +24,6 @@ async function getPrintfulImageURL(variantId) {
 
     if (!res.ok) return null;
     const data = await res.json();
-
-    // Look for mockup image
     const mockup = data.result?.files?.find(f => f.type === "preview");
     return mockup?.preview_url || null;
   } catch (err) {
@@ -35,7 +32,7 @@ async function getPrintfulImageURL(variantId) {
   }
 }
 
-// ✅ Check if variant is valid (exists)
+// ✅ Check if variant exists in Printful
 async function isValidPrintfulVariant(variantId) {
   try {
     const res = await fetch(`https://api.printful.com/store/variants/${variantId}`, {
@@ -93,7 +90,7 @@ async function sync() {
         continue;
       }
 
-      // Create product and price in Stripe
+      // Create Stripe product + price
       let stripeProduct, stripePrice;
       try {
         stripeProduct = await stripe.products.create({
@@ -106,15 +103,12 @@ async function sync() {
           currency: "cad",
         });
       } catch (err) {
-        console.error(`❌ Stripe error for variant ${printful_variant_id}:`, err.message);
+        console.error(`❌ Stripe error for ${printful_variant_id}: ${err.message}`);
         continue;
       }
 
-      // Get image (prefer preview/mockup)
       const imageUrl = await getPrintfulImageURL(printful_variant_id);
-      if (!imageUrl) {
-        console.warn(`⚠️ No image found for ${printful_variant_id}`);
-      }
+      if (!imageUrl) console.warn(`⚠️ No image found for ${printful_variant_id}`);
 
       const color = options?.find(o => o.id === "color")?.value || "";
       const size = options?.find(o => o.id === "size")?.value || "";
@@ -152,8 +146,7 @@ async function sync() {
   }
 
   try {
-    console.log("📦 Inserting into Supabase:", JSON.stringify(insertMappings, null, 2));
-
+    console.log("📦 Inserting into Supabase...");
     const supabaseRes = await fetch(`${SUPABASE_URL}/rest/v1/variant_mappings`, {
       method: "POST",
       headers: {
