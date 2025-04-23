@@ -6,32 +6,36 @@ import Stripe from "stripe";
 import fetch from "node-fetch";
 dotenv.config();
 
-// ENV setup
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const PRINTFUL_API_KEY = process.env.PRINTFUL_API_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const DRY_RUN = process.env.DRY_RUN === "true"; // optional dry run mode
+const DRY_RUN = process.env.DRY_RUN === "true";
 
 const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
 const MODE = "live";
 
-// Gets the main image URL from Printful store variant
+// ✅ Get the product mockup image (not embroidery preview)
 async function getPrintfulImageURL(variantId) {
   try {
     const res = await fetch(`https://api.printful.com/store/variants/${variantId}`, {
       headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
     });
+
     if (!res.ok) return null;
     const data = await res.json();
-    return data.result?.files?.[0]?.preview_url || null;
+
+    // Use the file with type 'mockup' if available
+    const mockupFile = data.result?.files?.find(f => f.type === "mockup");
+    const fallback = data.result?.files?.[0];
+
+    return mockupFile?.preview_url || fallback?.preview_url || null;
   } catch (err) {
     console.warn(`⚠️ Failed to get image for ${variantId}: ${err.message}`);
     return null;
   }
 }
 
-// Validates a Printful store variant (exists)
 async function isValidPrintfulVariant(variantId) {
   try {
     const res = await fetch(`https://api.printful.com/store/variants/${variantId}`, {
@@ -47,7 +51,6 @@ async function isValidPrintfulVariant(variantId) {
   }
 }
 
-// Main sync function
 async function sync() {
   console.log("🔄 Starting Printful to Stripe & Supabase sync...");
 
