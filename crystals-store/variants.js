@@ -24,7 +24,7 @@ export function loadVariants(productId, blockEl) {
     return allVariants.find(v =>
       v.size === selectedSize &&
       v.color === selectedColor &&
-      v.available
+      (v.available ?? true)
     );
   }
 
@@ -41,6 +41,14 @@ export function loadVariants(productId, blockEl) {
       : "$0 CAD";
   }
 
+  function updatePreviewImage(variant) {
+    const img = blockEl.querySelector(".variant-preview");
+    if (img && variant?.image_url) {
+      img.src = variant.image_url;
+      img.alt = variant.variant_name;
+    }
+  }
+
   function updateButtons() {
     const matched = findMatchingVariant();
     const enable = !!matched;
@@ -51,12 +59,14 @@ export function loadVariants(productId, blockEl) {
     addToCartBtn.classList.toggle("disabled", !enable);
 
     updatePriceDisplay(matched);
+    updatePreviewImage(matched);
   }
 
   fetch(`${endpoint}?product_id=${productId}`)
     .then(res => res.json())
     .then(data => {
       allVariants = data?.variants || [];
+
       if (!allVariants.length) {
         colorContainer.innerHTML = "<p>No colors found.</p>";
         sizeContainer.innerHTML = "<p>No sizes found.</p>";
@@ -67,19 +77,18 @@ export function loadVariants(productId, blockEl) {
       const sizes = new Map();
 
       allVariants.forEach(v => {
-        if (v.color) colors.set(v.color, v.available);
-        if (v.size) sizes.set(v.size, v.available);
+        if (v.color) colors.set(v.color, v.available ?? true);
+        if (v.size) sizes.set(v.size, v.available ?? true);
       });
 
-      colorContainer.innerHTML = [...colors.entries()].map(([c, available]) =>
-        `<span class="color-option option ${available ? "" : "disabled"}" data-value="${c}">${c}</span>`
+      colorContainer.innerHTML = [...colors.entries()].map(([color, available]) =>
+        `<span class="color-option option ${available ? "" : "disabled"}" data-value="${color}">${color}</span>`
       ).join("");
 
-      sizeContainer.innerHTML = [...sizes.entries()].map(([s, available]) =>
-        `<span class="size-option option ${available ? "" : "disabled"}" data-value="${s}">${s}</span>`
+      sizeContainer.innerHTML = [...sizes.entries()].map(([size, available]) =>
+        `<span class="size-option option ${available ? "" : "disabled"}" data-value="${size}">${size}</span>`
       ).join("");
 
-      // Events for selecting color and size
       colorContainer.querySelectorAll(".color-option:not(.disabled)").forEach(span => {
         span.addEventListener("click", () => {
           selectedColor = span.dataset.value;
@@ -104,6 +113,7 @@ export function loadVariants(productId, blockEl) {
       sizeContainer.innerHTML = "<p>Error loading sizes.</p>";
     });
 
+  // 🛒 Add to Cart
   addToCartBtn.addEventListener("click", () => {
     const variant = findMatchingVariant();
     if (!variant) return;
@@ -111,18 +121,19 @@ export function loadVariants(productId, blockEl) {
     addToCart({
       variant_id: variant.printful_variant_id,
       stripe_price_id: variant.stripe_price_id,
-      name: variant.variant_name || "No Name",
-      size: variant.size,
-      color: variant.color,
-      price: parseFloat(variant.retail_price) || 0,
-      image: variant.image_url || "" // allow empty, but handled in renderer
-    });
+      name: variant.variant_name || "Unnamed Product", // ✅ correct for cart.js
+      image: variant.image_url || "",                  // ✅ correct for cart.js
+      size: variant.size || "N/A",
+      color: variant.color || "N/A",
+      price: parseFloat(variant.retail_price) || 0
+    });        
 
     updateCartUI();
     const modal = document.getElementById("cart-modal");
     if (modal) modal.classList.remove("hidden");
   });
 
+  // 💳 Buy Now
   buyNowBtn.addEventListener("click", () => {
     const variant = findMatchingVariant();
     if (!variant) return;
@@ -134,9 +145,9 @@ export function loadVariants(productId, blockEl) {
         line_items: [{
           variant_id: variant.printful_variant_id,
           stripe_price_id: variant.stripe_price_id,
-          name: variant.variant_name || "No Name",
-          size: variant.size,
-          color: variant.color,
+          name: variant.variant_name,
+          size: variant.size || "N/A",
+          color: variant.color || "N/A",
           price: parseFloat(variant.retail_price) || 0,
           image: variant.image_url || "",
           quantity: 1

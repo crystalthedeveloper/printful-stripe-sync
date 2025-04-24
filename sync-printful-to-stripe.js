@@ -48,6 +48,20 @@ async function isValidPrintfulVariant(variantId) {
   }
 }
 
+// ✅ Check if variant already exists in Supabase
+async function variantExistsInSupabase(variantId) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/variant_mappings?select=id&printful_variant_id=eq.${variantId}`, {
+    headers: {
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+    },
+  });
+
+  if (!res.ok) return false;
+  const data = await res.json();
+  return data.length > 0;
+}
+
 async function sync() {
   console.log("🔄 Starting Printful to Stripe & Supabase sync...");
 
@@ -92,7 +106,12 @@ async function sync() {
         continue;
       }
 
-      // Create Stripe product + price
+      const exists = await variantExistsInSupabase(printful_variant_id);
+      if (exists) {
+        console.log(`⚠️ Skipped ${printful_variant_id} - already exists in Supabase`);
+        continue;
+      }
+
       let stripeProduct, stripePrice;
       try {
         stripeProduct = await stripe.products.create({

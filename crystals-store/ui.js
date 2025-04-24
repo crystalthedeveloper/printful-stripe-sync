@@ -22,28 +22,35 @@ import {
       listEl.innerHTML = "";
   
       cart.forEach(item => {
-        const price = parseFloat(item.price) || 0;
         const name = item.name || "Unnamed Product";
-        const imageHTML = item.image
-          ? `<img src="${item.image}" alt="${name}" class="cart-thumb" />`
+        const price = parseFloat(item.price) || 0;
+        const color = item.color || "N/A";
+        const size = item.size || "N/A";
+  
+        const image = item.image || ""; // Optional fallback: || "/images/placeholder.png"
+        const imageHTML = image.startsWith("http")
+          ? `<img src="${image}" alt="${name}" class="cart-thumb" loading="lazy" style="max-width:60px; margin-right:12px; border-radius:6px;" />`
           : "";
   
         const div = document.createElement("div");
         div.className = "cart-item";
         div.innerHTML = `
-          ${imageHTML}
-          <div>
-            <p>${name} - ${item.color} / ${item.size}</p>
-            <p>$${price.toFixed(2)} x 
-              <input type="number" min="1" value="${item.quantity}" data-id="${item.variant_id}" class="qty-input">
-              <button data-id="${item.variant_id}" class="remove-item">✕</button>
-            </p>
+          <div style="display: flex; align-items: center;">
+            ${imageHTML}
+            <div class="cart-item-details">
+              <p style="margin: 0 0 4px; font-weight: 500;">${name} - ${color} / ${size}</p>
+              <p style="margin: 0;">
+                $${price.toFixed(2)} x 
+                <input type="number" min="1" value="${item.quantity}" data-id="${item.variant_id}" class="qty-input" style="width: 50px; margin: 0 6px;">
+                <button data-id="${item.variant_id}" class="remove-item" aria-label="Remove item" style="color: red; font-size: 16px;">✕</button>
+              </p>
+            </div>
           </div>
         `;
         listEl.appendChild(div);
       });
   
-      // Quantity inputs
+      // 🧮 Quantity change handler
       listEl.querySelectorAll(".qty-input").forEach(input => {
         input.addEventListener("change", () => {
           const id = input.dataset.id;
@@ -52,9 +59,12 @@ import {
         });
       });
   
-      // Remove buttons
+      // ❌ Remove item handler
       listEl.querySelectorAll(".remove-item").forEach(btn => {
-        btn.addEventListener("click", () => removeFromCart(btn.dataset.id));
+        btn.addEventListener("click", () => {
+          const id = btn.dataset.id;
+          removeFromCart(id);
+        });
       });
     }
   }  

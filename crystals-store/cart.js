@@ -15,40 +15,49 @@ export function saveCart(cart) {
 
 export function addToCart(variant) {
   const cart = getCart();
-  const existing = cart.find(item => item.variant_id === variant.variant_id);
   const price = parseFloat(variant.price) || 0;
+  const id = String(variant.variant_id || variant.printful_variant_id);
 
+  const existing = cart.find(item => String(item.variant_id) === id);
   if (existing) {
     existing.quantity += 1;
   } else {
-    cart.push({ ...variant, price, quantity: 1 });
+    cart.push({
+      variant_id: id,
+      stripe_price_id: variant.stripe_price_id || "",
+      name: variant.name || variant.variant_name || "Unnamed Product", // ✅ supports both
+      image: variant.image || variant.image_url || "",                  // ✅ supports both
+      color: variant.color || "N/A",
+      size: variant.size || "N/A",
+      price,
+      quantity: 1
+    });
   }
 
   saveCart(cart);
   updateCartUI();
 
-  // Show cart modal
   const modal = document.getElementById("cart-modal");
   if (modal) modal.classList.remove("hidden");
 }
 
 export function updateQuantity(variant_id, quantity) {
   const cart = getCart();
-  const item = cart.find(i => i.variant_id === variant_id);
+  const item = cart.find(i => String(i.variant_id) === String(variant_id));
   if (item) {
     item.quantity = quantity;
     if (item.quantity <= 0) {
       removeFromCart(variant_id);
-      return;
+    } else {
+      saveCart(cart);
+      updateCartUI();
     }
-    saveCart(cart);
-    updateCartUI();
   }
 }
 
 export function removeFromCart(variant_id) {
-  const cart = getCart().filter(item => item.variant_id !== variant_id);
-  saveCart(cart);
+  const updatedCart = getCart().filter(item => String(item.variant_id) !== String(variant_id));
+  saveCart(updatedCart);
   updateCartUI();
 }
 
@@ -58,8 +67,7 @@ export function clearCart() {
 }
 
 export function getCartTotal() {
-  const cart = getCart();
-  return cart.reduce((sum, item) => {
+  return getCart().reduce((sum, item) => {
     const price = parseFloat(item.price) || 0;
     return sum + price * item.quantity;
   }, 0).toFixed(2);
@@ -79,38 +87,49 @@ export function updateCartUI() {
   const listEl = document.querySelector(".cart-items");
   if (listEl) {
     listEl.innerHTML = "";
+
     cart.forEach(item => {
-      const price = parseFloat(item.price) || 0;
       const name = item.name || "Unnamed Product";
-      const imageTag = item.image?.startsWith("http")
-        ? `<img src="${item.image}" alt="${name}" class="cart-thumb" />`
-        : ""; // ✅ Prevent rendering broken image tag
+      const image = item.image || "";
+      const price = parseFloat(item.price) || 0;
+      const color = item.color || "N/A";
+      const size = item.size || "N/A";
+
+      const imageHTML = image.startsWith("http")
+        ? `<img src="${image}" alt="${name}" class="cart-thumb" loading="lazy" style="max-width:60px; margin-right:10px;" />`
+        : "";
 
       const div = document.createElement("div");
       div.className = "cart-item";
       div.innerHTML = `
-        ${imageTag}
-        <div>
-          <p>${name} - ${item.color} / ${item.size}</p>
-          <p>$${price.toFixed(2)} x 
-            <input type="number" min="1" value="${item.quantity}" data-id="${item.variant_id}" class="qty-input">
-            <button data-id="${item.variant_id}" class="remove-item">✕</button>
-          </p>
+        <div style="display:flex; align-items:center;">
+          ${imageHTML}
+          <div class="cart-item-details">
+            <p>${name} - ${color} / ${size}</p>
+            <p>
+              $${price.toFixed(2)} x 
+              <input type="number" min="1" value="${item.quantity}" data-id="${item.variant_id}" class="qty-input">
+              <button data-id="${item.variant_id}" class="remove-item" aria-label="Remove item">✕</button>
+            </p>
+          </div>
         </div>
       `;
       listEl.appendChild(div);
     });
 
     listEl.querySelectorAll(".qty-input").forEach(input => {
-      input.addEventListener("change", () => {
+      input.addEventListener("input", () => {
         const id = input.dataset.id;
-        const qty = parseInt(input.value);
-        updateQuantity(id, qty);
+        const qty = parseInt(input.value, 10);
+        if (!isNaN(qty)) updateQuantity(id, qty);
       });
     });
 
     listEl.querySelectorAll(".remove-item").forEach(btn => {
-      btn.addEventListener("click", () => removeFromCart(btn.dataset.id));
+      btn.addEventListener("click", () => {
+        const id = btn.dataset.id;
+        removeFromCart(id);
+      });
     });
   }
 }
