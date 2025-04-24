@@ -55,11 +55,11 @@ async function isValidVariant(variantId) {
   }
 }
 
-// 🔍 Cleans broken records from Supabase
+// 🔍 Cleans broken and duplicate records from Supabase
 async function cleanBrokenMappings() {
   console.log("🧹 Starting variant validation...");
 
-  const fetchRes = await fetch(`${SUPABASE_URL}/rest/v1/variant_mappings?select=printful_variant_id`, {
+  const fetchRes = await fetch(`${SUPABASE_URL}/rest/v1/variant_mappings?select=id,printful_variant_id`, {
     headers: {
       apikey: SUPABASE_SERVICE_ROLE_KEY,
       Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`
@@ -74,32 +74,48 @@ async function cleanBrokenMappings() {
 
   const mappings = await fetchRes.json();
   const toDelete = [];
+  const groupedById = new Map();
 
-  for (const { printful_variant_id } of mappings) {
-    const isValid = await isValidVariant(printful_variant_id);
-    if (!isValid) {
-      console.warn(`🗑️ Invalid: ${printful_variant_id}`);
-      toDelete.push(printful_variant_id);
+  // 🧼 Group variants by printful_variant_id
+  for (const row of mappings) {
+    if (!groupedById.has(row.printful_variant_id)) {
+      groupedById.set(row.printful_variant_id, []);
     }
+    groupedById.get(row.printful_variant_id).push(row);
+  }
+
+  // 🔁 Validate each group
+  for (const [variantId, rows] of groupedById.entries()) {
+    const isValid = await isValidVariant(variantId);
+
+    if (!isValid) {
+      console.warn(`🗑️ Invalid: ${variantId}`);
+      rows.forEach(r => toDelete.push(r.id));
+    } else if (rows.length > 1) {
+      console.log(`⚠️ Duplicate: ${variantId} (${rows.length} entries)`);
+      // Keep only one, remove the rest
+      rows.slice(1).forEach(r => toDelete.push(r.id));
+    }
+
     await new Promise(res => setTimeout(res, delayMs)); // avoid rate limits
   }
 
   if (toDelete.length === 0) {
-    console.log("✅ All variants are valid. No deletions needed.");
+    console.log("✅ All variants are valid and unique. No deletions needed.");
     return;
   }
 
   if (DRY_RUN) {
-    console.log("🚫 DRY RUN — would delete these variants:");
-    console.table(toDelete.map(id => ({ printful_variant_id: id })));
+    console.log("🚫 DRY RUN — would delete the following entries:");
+    console.table(toDelete.map(id => ({ id })));
     return;
   }
 
-  console.log(`🧹 Deleting ${toDelete.length} broken variants from Supabase...`);
+  console.log(`🧹 Deleting ${toDelete.length} entries from Supabase...`);
 
   const results = await Promise.allSettled(
     toDelete.map(id =>
-      fetch(`${SUPABASE_URL}/rest/v1/variant_mappings?printful_variant_id=eq.${id}`, {
+      fetch(`${SUPABASE_URL}/rest/v1/variant_mappings?id=eq.${id}`, {
         method: "DELETE",
         headers: {
           apikey: SUPABASE_SERVICE_ROLE_KEY,
