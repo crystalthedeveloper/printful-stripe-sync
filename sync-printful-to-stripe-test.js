@@ -1,32 +1,29 @@
-// sync-printful-to-stripe.js
-// Syncs Printful variants to Stripe and Supabase with mockup image support
+// sync-printful-to-stripe-test.js
+// Syncs Printful variants to Stripe Sandbox and Supabase (test mode)
 
 import dotenv from "dotenv";
 import Stripe from "stripe";
 import fetch from "node-fetch";
 dotenv.config();
 
-const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+const STRIPE_SECRET_TEST = process.env.STRIPE_SECRET_TEST;
 const PRINTFUL_API_KEY = process.env.PRINTFUL_API_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const DRY_RUN = process.env.DRY_RUN === "true";
-const MODE = "live";
+const MODE = "test";
 
-const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
+const stripe = new Stripe(STRIPE_SECRET_TEST, { apiVersion: "2023-10-16" });
 
-// ✅ Get mockup image from the sync product endpoint
 async function getPrintfulImageURLFromProduct(productId, variantId) {
   try {
     const res = await fetch(`https://api.printful.com/sync/products/${productId}`, {
       headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
     });
-
     if (!res.ok) return null;
     const data = await res.json();
     const variant = data.result?.sync_variants?.find(v => v.id === variantId);
     const image = variant?.files?.find(f => f.type === "preview");
-
     return image?.preview_url || null;
   } catch (err) {
     console.warn(`⚠️ Could not fetch image for variant ${variantId}: ${err.message}`);
@@ -34,7 +31,6 @@ async function getPrintfulImageURLFromProduct(productId, variantId) {
   }
 }
 
-// ✅ Confirm variant exists
 async function isValidPrintfulVariant(variantId) {
   try {
     const res = await fetch(`https://api.printful.com/store/variants/${variantId}`, {
@@ -48,27 +44,24 @@ async function isValidPrintfulVariant(variantId) {
   }
 }
 
-// ✅ Check if variant already exists in Supabase
-async function variantExistsInSupabase(variantId) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/variant_mappings?select=id&printful_variant_id=eq.${variantId}`, {
+async function variantExistsInSupabase(variantId, mode) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/variant_mappings?select=id&printful_variant_id=eq.${variantId}&mode=eq.${mode}`, {
     headers: {
       apikey: SUPABASE_SERVICE_ROLE_KEY,
       Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
     },
   });
-
   if (!res.ok) return false;
   const data = await res.json();
   return data.length > 0;
 }
 
 async function sync() {
-  console.log("🔄 Starting Printful to Stripe & Supabase sync...");
+  console.log("🔄 Syncing to Stripe TEST & Supabase test mode...");
 
   const productRes = await fetch("https://api.printful.com/sync/products", {
     headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
   });
-
   const productList = (await productRes.json()).result;
   const insertMappings = [];
 
@@ -76,23 +69,13 @@ async function sync() {
     const detailRes = await fetch(`https://api.printful.com/sync/products/${product.id}`, {
       headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
     });
-
     const detailData = await detailRes.json();
     const productName = detailData.result?.sync_product?.name;
     const syncVariants = detailData.result?.sync_variants;
-
     if (!productName || !Array.isArray(syncVariants)) continue;
 
     for (const variant of syncVariants) {
-      const {
-        id: printful_variant_id,
-        name: variantName,
-        retail_price,
-        is_ignored,
-        is_deleted,
-        options,
-      } = variant;
-
+      const { id: printful_variant_id, name: variantName, retail_price, is_ignored, is_deleted, options } = variant;
       console.log(`🔍 Checking variant ${variantName} (${printful_variant_id})`);
 
       if (is_deleted || is_ignored) {
@@ -106,7 +89,7 @@ async function sync() {
         continue;
       }
 
-      const exists = await variantExistsInSupabase(printful_variant_id);
+      const exists = await variantExistsInSupabase(printful_variant_id, MODE);
       if (exists) {
         console.log(`⚠️ Skipped ${printful_variant_id} - already exists in Supabase`);
         continue;
@@ -117,7 +100,6 @@ async function sync() {
         stripeProduct = await stripe.products.create({
           name: `${productName} - ${variantName}`,
         });
-
         stripePrice = await stripe.prices.create({
           product: stripeProduct.id,
           unit_amount: Math.round(parseFloat(retail_price) * 100),
@@ -129,8 +111,6 @@ async function sync() {
       }
 
       const imageUrl = await getPrintfulImageURLFromProduct(product.id, printful_variant_id);
-      if (!imageUrl) console.warn(`⚠️ No image found for ${printful_variant_id}`);
-
       const color = options?.find(o => o.id === "color")?.value || "";
       const size = options?.find(o => o.id === "size")?.value || "";
 
@@ -146,7 +126,7 @@ async function sync() {
         created_at: new Date().toISOString(),
       });
 
-      console.log(`✅ Synced ${variantName} → Stripe price ${stripePrice.id}`);
+      console.log(`✅ Synced ${variantName} → Stripe TEST price ${stripePrice.id}`);
     }
   }
 
@@ -178,15 +158,11 @@ async function sync() {
       },
       body: JSON.stringify(insertMappings),
     });
-
     const supabaseText = await supabaseRes.text();
-    console.log("📝 Supabase response:", supabaseText);
-
     if (!supabaseRes.ok) {
       throw new Error(`❌ Failed to insert into Supabase: ${supabaseText}`);
     }
-
-    console.log(`🎉 Synced ${insertMappings.length} variants into Supabase successfully`);
+    console.log(`🎉 Synced ${insertMappings.length} variants to Supabase (test mode)`);
   } catch (err) {
     console.error("❌ Supabase insert failed:", err.message);
   }
