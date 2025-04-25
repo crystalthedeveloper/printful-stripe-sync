@@ -17,18 +17,25 @@ export function addToCart(variant) {
   const cart = getCart();
   const price = parseFloat(variant.price) || 0;
   const id = String(variant.variant_id || variant.printful_variant_id);
+  const size = variant.size || "N/A";
+  const color = variant.color || "N/A";
 
-  const existing = cart.find(item => String(item.variant_id) === id);
+  const existing = cart.find(item =>
+    String(item.variant_id) === id &&
+    item.size === size &&
+    item.color === color
+  );
+
   if (existing) {
     existing.quantity += 1;
   } else {
     cart.push({
       variant_id: id,
       stripe_price_id: variant.stripe_price_id || "",
-      name: variant.name || variant.variant_name || "Unnamed Product", // ✅ supports both
-      image: variant.image || variant.image_url || "",                  // ✅ supports both
-      color: variant.color || "N/A",
-      size: variant.size || "N/A",
+      name: variant.name || variant.variant_name || "Unnamed Product",
+      image: variant.image || variant.image_url || "",
+      color,
+      size,
       price,
       quantity: 1
     });
@@ -41,22 +48,32 @@ export function addToCart(variant) {
   if (modal) modal.classList.remove("hidden");
 }
 
-export function updateQuantity(variant_id, quantity) {
+export function updateQuantity(variant_id, quantity, size, color) {
   const cart = getCart();
-  const item = cart.find(i => String(i.variant_id) === String(variant_id));
+  const item = cart.find(i =>
+    String(i.variant_id) === String(variant_id) &&
+    i.size === size &&
+    i.color === color
+  );
+
   if (item) {
     item.quantity = quantity;
     if (item.quantity <= 0) {
-      removeFromCart(variant_id);
+      removeFromCart(variant_id, size, color);
     } else {
       saveCart(cart);
-      updateCartUI();
     }
   }
+
+  updateCartUI(); // ⬅️ ensure total updates even if value is invalid or unchanged
 }
 
-export function removeFromCart(variant_id) {
-  const updatedCart = getCart().filter(item => String(item.variant_id) !== String(variant_id));
+export function removeFromCart(variant_id, size, color) {
+  const updatedCart = getCart().filter(item =>
+    !(String(item.variant_id) === String(variant_id) &&
+      item.size === size &&
+      item.color === color)
+  );
   saveCart(updatedCart);
   updateCartUI();
 }
@@ -108,8 +125,17 @@ export function updateCartUI() {
             <p>${name} - ${color} / ${size}</p>
             <p>
               $${price.toFixed(2)} x 
-              <input type="number" min="1" value="${item.quantity}" data-id="${item.variant_id}" class="qty-input">
-              <button data-id="${item.variant_id}" class="remove-item" aria-label="Remove item">✕</button>
+              <input type="number" min="1" value="${item.quantity}" 
+                data-id="${item.variant_id}" 
+                data-size="${size}" 
+                data-color="${color}" 
+                class="qty-input">
+              <button 
+                data-id="${item.variant_id}" 
+                data-size="${size}" 
+                data-color="${color}" 
+                class="remove-item" 
+                aria-label="Remove item">✕</button>
             </p>
           </div>
         </div>
@@ -117,18 +143,29 @@ export function updateCartUI() {
       listEl.appendChild(div);
     });
 
+    // ✅ Quantity change listener (ensures total refresh)
     listEl.querySelectorAll(".qty-input").forEach(input => {
-      input.addEventListener("input", () => {
+      input.addEventListener("change", () => {
         const id = input.dataset.id;
+        const size = input.dataset.size;
+        const color = input.dataset.color;
         const qty = parseInt(input.value, 10);
-        if (!isNaN(qty)) updateQuantity(id, qty);
+        if (!isNaN(qty) && qty > 0) {
+          updateQuantity(id, qty, size, color);
+        } else {
+          input.value = 1;
+          updateQuantity(id, 1, size, color);
+        }
       });
     });
 
+    // ❌ Remove item listener
     listEl.querySelectorAll(".remove-item").forEach(btn => {
       btn.addEventListener("click", () => {
         const id = btn.dataset.id;
-        removeFromCart(id);
+        const size = btn.dataset.size;
+        const color = btn.dataset.color;
+        removeFromCart(id, size, color);
       });
     });
   }

@@ -1,7 +1,6 @@
 // variants.js
 
-import { addToCart } from "./cart.js";
-import { updateCartUI } from "./ui.js";
+import { addToCart, getCart, updateCartUI } from "./cart.js";
 
 const endpoint = "https://busjhforwvqhuaivgbac.supabase.co/functions/v1/get-printful-variants";
 const checkoutEndpoint = "https://busjhforwvqhuaivgbac.supabase.co/functions/v1/create-checkout-session";
@@ -109,24 +108,22 @@ export function loadVariants(productId, blockEl) {
     })
     .catch(err => {
       console.error("❌ Failed to load variants:", err);
-      colorContainer.innerHTML = "<p>Error loading colors.</p>";
-      sizeContainer.innerHTML = "<p>Error loading sizes.</p>";
     });
 
   // 🛒 Add to Cart
   addToCartBtn.addEventListener("click", () => {
     const variant = findMatchingVariant();
-    if (!variant) return;
+    if (!variant || !variant.stripe_price_id) return;
 
     addToCart({
       variant_id: variant.printful_variant_id,
       stripe_price_id: variant.stripe_price_id,
-      name: variant.variant_name || "Unnamed Product", // ✅ correct for cart.js
-      image: variant.image_url || "",                  // ✅ correct for cart.js
+      name: variant.variant_name || "Unnamed Product",
+      image: variant.image_url || "",
       size: variant.size || "N/A",
       color: variant.color || "N/A",
       price: parseFloat(variant.retail_price) || 0
-    });        
+    });
 
     updateCartUI();
     const modal = document.getElementById("cart-modal");
@@ -136,30 +133,66 @@ export function loadVariants(productId, blockEl) {
   // 💳 Buy Now
   buyNowBtn.addEventListener("click", () => {
     const variant = findMatchingVariant();
-    if (!variant) return;
+    if (!variant || !variant.stripe_price_id) {
+      console.error("❌ No valid Stripe price ID for selected variant.");
+      return;
+    }
 
     fetch(checkoutEndpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         line_items: [{
-          variant_id: variant.printful_variant_id,
-          stripe_price_id: variant.stripe_price_id,
+          price: variant.stripe_price_id, // ✅ correct key
+          quantity: 1,
           name: variant.variant_name,
-          size: variant.size || "N/A",
           color: variant.color || "N/A",
-          price: parseFloat(variant.retail_price) || 0,
-          image: variant.image_url || "",
-          quantity: 1
-        }]
+          size: variant.size || "N/A",
+          image: variant.image_url || ""
+        }],
+        currency: "CAD"
       })
     })
       .then(res => res.json())
       .then(data => {
-        if (data?.url) window.location.href = data.url;
+        if (data?.url) {
+          window.location.href = data.url;
+        } else {
+          console.error("❌ No URL returned from checkout session.");
+        }
       })
       .catch(err => {
         console.error("❌ Checkout error:", err);
       });
   });
+}
+
+// 🧾 Full Cart Checkout Handler
+export function checkoutCart() {
+  const cart = getCart();
+  const line_items = cart.map(item => ({
+    price: item.stripe_price_id, // ✅ use `price` for Stripe
+    quantity: item.quantity,
+    name: item.name,
+    color: item.color,
+    size: item.size,
+    image: item.image
+  }));
+
+  fetch("https://busjhforwvqhuaivgbac.supabase.co/functions/v1/create-checkout-session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      line_items,
+      currency: "CAD"
+    })
+  })
+    .then(res => res.json())
+    .then(data => {
+      if (data?.url) window.location.href = data.url;
+      else console.error("❌ Stripe session URL not returned.");
+    })
+    .catch(err => {
+      console.error("❌ Cart Checkout error:", err);
+    });
 }

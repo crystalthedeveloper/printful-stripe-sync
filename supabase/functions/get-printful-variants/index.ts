@@ -12,7 +12,6 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
 };
 
-// Type Definitions
 interface SyncVariant {
   id: number;
   name: string;
@@ -25,13 +24,13 @@ interface SyncVariant {
 interface Mapping {
   printful_variant_id: number;
   stripe_price_id: string;
+  image_url: string;
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
   const { searchParams } = new URL(req.url);
   const productId = searchParams.get("product_id");
 
-  // ✅ Check environment (avoid local misfires)
   if (!PRINTFUL_API_KEY || !SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
     console.error("❌ Missing environment variable.");
     return new Response(JSON.stringify({ error: "Server misconfiguration" }), {
@@ -39,9 +38,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
       headers: corsHeaders,
     });
   }
-
-  // ✅ Optional debug for deployed keys
-  console.log("🔐 Using PRINTFUL_API_KEY starting with:", PRINTFUL_API_KEY.slice(0, 4));
 
   if (!productId) {
     return new Response(JSON.stringify({ error: "Missing product_id" }), {
@@ -51,7 +47,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   try {
-    // 1. Fetch product details from Printful
+    // 1. Fetch product + variants from Printful
     const res = await fetch(`https://api.printful.com/store/products/${productId}`, {
       headers: {
         Authorization: `Bearer ${PRINTFUL_API_KEY}`,
@@ -70,10 +66,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const product = await res.json();
     const syncVariants: SyncVariant[] = product.result.sync_variants;
 
-    // 2. Fetch Stripe mappings from Supabase
+    // 2. Fetch mappings from Supabase with image_url
     const variantIds = syncVariants.map((v) => v.id).join(",");
     const mappingRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/variant_mappings?printful_variant_id=in.(${variantIds})`,
+      `${SUPABASE_URL}/rest/v1/variant_mappings?select=printful_variant_id,stripe_price_id,image_url&printful_variant_id=in.(${variantIds})`,
       {
         headers: {
           apikey: SUPABASE_SERVICE_ROLE_KEY,
@@ -84,18 +80,24 @@ Deno.serve(async (req: Request): Promise<Response> => {
     );
 
     const mappings: Mapping[] = await mappingRes.json();
-    const mappingMap = new Map(mappings.map((m) => [String(m.printful_variant_id), m.stripe_price_id]));
+    const mappingMap = new Map(
+      mappings.map((m) => [String(m.printful_variant_id), { stripe_price_id: m.stripe_price_id, image_url: m.image_url }])
+    );
 
-    // 3. Combine and return enriched data
-    const variants = syncVariants.map((v) => ({
-      id: v.id,
-      name: v.name,
-      size: v.size,
-      color: v.color,
-      available: v.available !== false,
-      retail_price: v.retail_price,
-      stripe_price_id: mappingMap.get(String(v.id)) || null,
-    }));
+    // 3. Merge Printful + Supabase data
+    const variants = syncVariants.map((v) => {
+      const mapping = mappingMap.get(String(v.id));
+      return {
+        id: v.id,
+        variant_name: v.name, // ✅ Use `variant_name` instead of `name`
+        size: v.size,
+        color: v.color,
+        available: v.available !== false,
+        retail_price: v.retail_price,
+        stripe_price_id: mapping?.stripe_price_id || null,
+        image_url: mapping?.image_url || "",
+      };
+    });
 
     return new Response(JSON.stringify({ variants }), {
       status: 200,
