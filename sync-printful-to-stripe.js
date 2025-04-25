@@ -6,14 +6,14 @@ import Stripe from "stripe";
 import fetch from "node-fetch";
 dotenv.config();
 
-const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+const STRIPE_SECRET_TEST = process.env.STRIPE_SECRET_TEST;
 const PRINTFUL_API_KEY = process.env.PRINTFUL_API_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const DRY_RUN = process.env.DRY_RUN === "true";
 const MODE = "live";
 
-const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
+const stripe = new Stripe(STRIPE_SECRET_TEST, { apiVersion: "2023-10-16" });
 
 // ✅ Get mockup image from the sync product endpoint
 async function getPrintfulImageURLFromProduct(productId, variantId) {
