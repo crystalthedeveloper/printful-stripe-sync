@@ -2,7 +2,12 @@
 
 import { addToCart, getCart, updateCartUI } from "./cart.js";
 
-const endpoint = "https://busjhforwvqhuaivgbac.supabase.co/functions/v1/get-printful-variants";
+const isTest = true;
+
+const endpoint = isTest
+  ? "https://busjhforwvqhuaivgbac.supabase.co/functions/v1/get-printful-variants-test"
+  : "https://busjhforwvqhuaivgbac.supabase.co/functions/v1/get-printful-variants";
+
 const checkoutEndpoint = "https://busjhforwvqhuaivgbac.supabase.co/functions/v1/create-checkout-session";
 
 export function loadVariants(productId, blockEl) {
@@ -113,7 +118,10 @@ export function loadVariants(productId, blockEl) {
   // 🛒 Add to Cart
   addToCartBtn.addEventListener("click", () => {
     const variant = findMatchingVariant();
-    if (!variant || !variant.stripe_price_id) return;
+    if (!variant || !variant.stripe_price_id) {
+      console.warn("⚠️ No Stripe price ID on Add to Cart variant:", variant);
+      return;
+    }
 
     addToCart({
       variant_id: variant.printful_variant_id,
@@ -134,31 +142,37 @@ export function loadVariants(productId, blockEl) {
   buyNowBtn.addEventListener("click", () => {
     const variant = findMatchingVariant();
     if (!variant || !variant.stripe_price_id) {
-      console.error("❌ No valid Stripe price ID for selected variant.");
+      console.error("❌ No valid Stripe price ID for selected variant:", variant);
       return;
     }
+
+    const payload = {
+      line_items: [{
+        price: variant.stripe_price_id,
+        quantity: 1,
+        name: variant.variant_name || "",
+        color: variant.color || "N/A",
+        size: variant.size || "N/A",
+        image: variant.image_url || ""
+      }],
+      currency: "CAD",
+      environment: isTest ? "test" : "live"
+    };
+
+    console.log("🧾 Sending Buy Now checkout payload:", payload);
 
     fetch(checkoutEndpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        line_items: [{
-          price: variant.stripe_price_id, // ✅ correct key
-          quantity: 1,
-          name: variant.variant_name,
-          color: variant.color || "N/A",
-          size: variant.size || "N/A",
-          image: variant.image_url || ""
-        }],
-        currency: "CAD"
-      })
+      body: JSON.stringify(payload)
     })
       .then(res => res.json())
       .then(data => {
         if (data?.url) {
+          console.log("✅ Redirecting to Stripe:", data.url);
           window.location.href = data.url;
         } else {
-          console.error("❌ No URL returned from checkout session.");
+          console.error("❌ No URL returned from checkout session. Response:", data);
         }
       })
       .catch(err => {
@@ -171,7 +185,7 @@ export function loadVariants(productId, blockEl) {
 export function checkoutCart() {
   const cart = getCart();
   const line_items = cart.map(item => ({
-    price: item.stripe_price_id, // ✅ use `price` for Stripe
+    price: item.stripe_price_id,
     quantity: item.quantity,
     name: item.name,
     color: item.color,
@@ -179,18 +193,27 @@ export function checkoutCart() {
     image: item.image
   }));
 
-  fetch("https://busjhforwvqhuaivgbac.supabase.co/functions/v1/create-checkout-session", {
+  const payload = {
+    line_items,
+    currency: "CAD",
+    environment: isTest ? "test" : "live"
+  };
+
+  console.log("🧾 Sending Cart checkout payload:", payload);
+
+  fetch(checkoutEndpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      line_items,
-      currency: "CAD"
-    })
+    body: JSON.stringify(payload)
   })
     .then(res => res.json())
     .then(data => {
-      if (data?.url) window.location.href = data.url;
-      else console.error("❌ Stripe session URL not returned.");
+      if (data?.url) {
+        console.log("✅ Redirecting to Stripe from cart:", data.url);
+        window.location.href = data.url;
+      } else {
+        console.error("❌ Stripe session URL not returned. Response:", data);
+      }
     })
     .catch(err => {
       console.error("❌ Cart Checkout error:", err);
