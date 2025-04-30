@@ -26,8 +26,8 @@ import {
         const price = parseFloat(item.price) || 0;
         const color = item.color || "N/A";
         const size = item.size || "N/A";
+        const image = item.image || "";
   
-        const image = item.image || ""; // Optional fallback: || "/images/placeholder.png"
         const imageHTML = image.startsWith("http")
           ? `<img src="${image}" alt="${name}" class="cart-thumb" loading="lazy" style="max-width:60px; margin-right:12px; border-radius:6px;" />`
           : "";
@@ -41,8 +41,18 @@ import {
               <p style="margin: 0 0 4px; font-weight: 500;">${name} - ${color} / ${size}</p>
               <p style="margin: 0;">
                 $${price.toFixed(2)} x 
-                <input type="number" min="1" value="${item.quantity}" data-id="${item.variant_id}" class="qty-input" style="width: 50px; margin: 0 6px;">
-                <button data-id="${item.variant_id}" class="remove-item" aria-label="Remove item" style="color: red; font-size: 16px;">✕</button>
+                <input type="number" min="1" value="${item.quantity}" 
+                  data-id="${item.variant_id}" 
+                  data-size="${size}" 
+                  data-color="${color}" 
+                  data-price-id="${item.stripe_price_id}" 
+                  class="qty-input" style="width: 50px; margin: 0 6px;">
+                <button 
+                  data-id="${item.variant_id}" 
+                  data-size="${size}" 
+                  data-color="${color}" 
+                  data-price-id="${item.stripe_price_id}"
+                  class="remove-item" aria-label="Remove item" style="color: red; font-size: 16px;">✕</button>
               </p>
             </div>
           </div>
@@ -54,8 +64,16 @@ import {
       listEl.querySelectorAll(".qty-input").forEach(input => {
         input.addEventListener("change", () => {
           const id = input.dataset.id;
-          const qty = parseInt(input.value);
-          updateQuantity(id, qty);
+          const qty = parseInt(input.value, 10);
+          const size = input.dataset.size;
+          const color = input.dataset.color;
+          const price_id = input.dataset.priceId;
+          if (!isNaN(qty) && qty > 0) {
+            updateQuantity(id, qty, size, color, price_id);
+          } else {
+            input.value = 1;
+            updateQuantity(id, 1, size, color, price_id);
+          }
         });
       });
   
@@ -63,7 +81,10 @@ import {
       listEl.querySelectorAll(".remove-item").forEach(btn => {
         btn.addEventListener("click", () => {
           const id = btn.dataset.id;
-          removeFromCart(id);
+          const size = btn.dataset.size;
+          const color = btn.dataset.color;
+          const price_id = btn.dataset.priceId;
+          removeFromCart(id, size, color, price_id);
         });
       });
     }

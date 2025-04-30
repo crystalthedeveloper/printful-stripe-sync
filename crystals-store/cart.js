@@ -19,11 +19,13 @@ export function addToCart(variant) {
   const id = String(variant.variant_id || variant.printful_variant_id);
   const size = variant.size || "N/A";
   const color = variant.color || "N/A";
+  const stripe_price_id = variant.stripe_price_id || "";
 
   const existing = cart.find(item =>
     String(item.variant_id) === id &&
     item.size === size &&
-    item.color === color
+    item.color === color &&
+    item.stripe_price_id === stripe_price_id
   );
 
   if (existing) {
@@ -31,7 +33,7 @@ export function addToCart(variant) {
   } else {
     cart.push({
       variant_id: id,
-      stripe_price_id: variant.stripe_price_id || "",
+      stripe_price_id,
       name: variant.name || variant.variant_name || "Unnamed Product",
       image: variant.image || variant.image_url || "",
       color,
@@ -48,31 +50,35 @@ export function addToCart(variant) {
   if (modal) modal.classList.remove("hidden");
 }
 
-export function updateQuantity(variant_id, quantity, size, color) {
+export function updateQuantity(variant_id, quantity, size, color, stripe_price_id) {
   const cart = getCart();
   const item = cart.find(i =>
     String(i.variant_id) === String(variant_id) &&
     i.size === size &&
-    i.color === color
+    i.color === color &&
+    i.stripe_price_id === stripe_price_id
   );
 
   if (item) {
     item.quantity = quantity;
     if (item.quantity <= 0) {
-      removeFromCart(variant_id, size, color);
+      removeFromCart(variant_id, size, color, stripe_price_id);
     } else {
       saveCart(cart);
     }
   }
 
-  updateCartUI(); // ⬅️ ensure total updates even if value is invalid or unchanged
+  updateCartUI();
 }
 
-export function removeFromCart(variant_id, size, color) {
+export function removeFromCart(variant_id, size, color, stripe_price_id) {
   const updatedCart = getCart().filter(item =>
-    !(String(item.variant_id) === String(variant_id) &&
+    !(
+      String(item.variant_id) === String(variant_id) &&
       item.size === size &&
-      item.color === color)
+      item.color === color &&
+      item.stripe_price_id === stripe_price_id
+    )
   );
   saveCart(updatedCart);
   updateCartUI();
@@ -129,11 +135,13 @@ export function updateCartUI() {
                 data-id="${item.variant_id}" 
                 data-size="${size}" 
                 data-color="${color}" 
+                data-price-id="${item.stripe_price_id}"
                 class="qty-input">
               <button 
                 data-id="${item.variant_id}" 
                 data-size="${size}" 
                 data-color="${color}" 
+                data-price-id="${item.stripe_price_id}"
                 class="remove-item" 
                 aria-label="Remove item">✕</button>
             </p>
@@ -143,29 +151,31 @@ export function updateCartUI() {
       listEl.appendChild(div);
     });
 
-    // ✅ Quantity change listener (ensures total refresh)
+    // Quantity change handler
     listEl.querySelectorAll(".qty-input").forEach(input => {
       input.addEventListener("change", () => {
         const id = input.dataset.id;
         const size = input.dataset.size;
         const color = input.dataset.color;
+        const priceId = input.dataset.priceId;
         const qty = parseInt(input.value, 10);
         if (!isNaN(qty) && qty > 0) {
-          updateQuantity(id, qty, size, color);
+          updateQuantity(id, qty, size, color, priceId);
         } else {
           input.value = 1;
-          updateQuantity(id, 1, size, color);
+          updateQuantity(id, 1, size, color, priceId);
         }
       });
     });
 
-    // ❌ Remove item listener
+    // Remove item handler
     listEl.querySelectorAll(".remove-item").forEach(btn => {
       btn.addEventListener("click", () => {
         const id = btn.dataset.id;
         const size = btn.dataset.size;
         const color = btn.dataset.color;
-        removeFromCart(id, size, color);
+        const priceId = btn.dataset.priceId;
+        removeFromCart(id, size, color, priceId);
       });
     });
   }

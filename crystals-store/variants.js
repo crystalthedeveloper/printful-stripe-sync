@@ -138,6 +138,7 @@ export function loadVariants(productId, blockEl) {
     if (modal) modal.classList.remove("hidden");
   });
 
+
   // 💳 Buy Now
   buyNowBtn.addEventListener("click", () => {
     const variant = findMatchingVariant();
@@ -196,6 +197,7 @@ export function checkoutCart() {
   const payload = {
     line_items,
     currency: "CAD",
+    email: localStorage.getItem("user_email"),
     environment: isTest ? "test" : "live"
   };
 

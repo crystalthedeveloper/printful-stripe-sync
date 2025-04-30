@@ -31,14 +31,13 @@ serve(async (req: Request): Promise<Response> => {
     const {
       line_items,
       email,
-      environment = "live", // 👈 control live/test mode
+      environment = "live",
       mode = "payment",
       success_url = "https://www.crystalthedeveloper.ca/store/success",
       cancel_url = "https://www.crystalthedeveloper.ca/store/cancel",
       shipping_countries = ["US", "CA"],
     } = await req.json();
 
-    // 🔍 Debug log input
     console.log("📦 Incoming request payload:", {
       environment,
       line_items,
@@ -59,16 +58,15 @@ serve(async (req: Request): Promise<Response> => {
 
     const STRIPE_SECRET_KEY = environment === "test" ? STRIPE_SECRET_TEST : STRIPE_SECRET_LIVE;
 
-    // 🔐 Debug which key is being used
-    console.log("🔐 Using environment:", environment);
-    console.log("🔑 STRIPE_SECRET_KEY starts with:", STRIPE_SECRET_KEY?.slice(0, 8));
-
     if (!STRIPE_SECRET_KEY) {
       return new Response(JSON.stringify({ error: `Missing Stripe secret for ${environment}` }), {
         status: 500,
         headers: corsHeaders,
       });
     }
+
+    console.log("🔐 Using environment:", environment);
+    console.log("🔑 STRIPE_SECRET_KEY starts with:", STRIPE_SECRET_KEY?.slice(0, 8));
 
     interface LineItem {
       price?: string;
@@ -82,6 +80,8 @@ serve(async (req: Request): Promise<Response> => {
     formData.append("cancel_url", cancel_url);
     formData.append("payment_method_types[0]", "card");
 
+    let validItems = 0;
+
     line_items.forEach((item: LineItem, index: number) => {
       const priceId = item.price || item.stripe_price_id;
       if (!priceId) {
@@ -89,21 +89,29 @@ serve(async (req: Request): Promise<Response> => {
         return;
       }
 
+      console.log(`✅ Adding line item ${index}:`, { priceId, quantity: item.quantity || 1 });
       formData.append(`line_items[${index}][price]`, priceId);
       formData.append(`line_items[${index}][quantity]`, String(item.quantity || 1));
+      validItems++;
     });
 
-    if (shipping_countries.length > 0) {
-      shipping_countries.forEach((code: string, i: number) => {
-        formData.append(`shipping_address_collection[allowed_countries][${i}]`, code);
+    if (validItems === 0) {
+      console.error("❌ No valid line items with Stripe price IDs were found.");
+      return new Response(JSON.stringify({ error: "No valid line items with Stripe price IDs." }), {
+        status: 400,
+        headers: corsHeaders,
       });
     }
+
+    shipping_countries.forEach((code: string, i: number) => {
+      formData.append(`shipping_address_collection[allowed_countries][${i}]`, code);
+    });
 
     if (email) {
       formData.append("customer_email", email);
     }
 
-    console.log("📤 Sending to Stripe with body:", formData.toString());
+    console.log("📤 Sending formData to Stripe:", formData.toString());
 
     const stripeRes = await fetch(stripeEndpoint, {
       method: "POST",
@@ -126,7 +134,7 @@ serve(async (req: Request): Promise<Response> => {
       });
     }
 
-    console.log("✅ Stripe session created:", stripeData.url);
+    console.log("✅ Stripe session created successfully:", stripeData.url);
 
     return new Response(JSON.stringify({ url: stripeData.url }), {
       status: 200,

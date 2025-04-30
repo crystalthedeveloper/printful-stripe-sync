@@ -38,6 +38,7 @@ interface PrintfulFile { type: string; url: string; }
 interface PrintfulVariantResponse { result?: { files?: PrintfulFile[] }; }
 
 async function getPrintfulImageURL(variantId: number): Promise<string | null> {
+  console.log(`🔍 Getting Printful image for variant ID: ${variantId}`);
   const res = await fetch(`https://api.printful.com/products/variant/${variantId}`, {
     headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
   });
@@ -52,6 +53,7 @@ async function getPrintfulImageURL(variantId: number): Promise<string | null> {
 
 async function getMappedVariantId(stripePriceId: string): Promise<number | null> {
   const mode = stripePriceId.startsWith("price_1") ? "live" : "test";
+  console.log(`🔁 Getting mapped Printful variant for Stripe price ID: ${stripePriceId} (mode: ${mode})`);
 
   const res = await fetch(
     `${SUPABASE_URL}/rest/v1/variant_mappings?stripe_price_id=eq.${stripePriceId}&mode=eq.${mode}`,
@@ -66,10 +68,11 @@ async function getMappedVariantId(stripePriceId: string): Promise<number | null>
 
   const data = await res.json();
   if (!res.ok || !Array.isArray(data) || data.length === 0) {
-    console.error(`❌ No ${mode} mapping found for Stripe price ID:`, stripePriceId);
+    console.warn(`⚠️ No mapping found for Stripe price ID ${stripePriceId} in ${mode} mode`);
     return null;
   }
 
+  console.log(`✅ Found Printful variant ID ${data[0].printful_variant_id}`);
   return Number(data[0].printful_variant_id);
 }
 
@@ -102,6 +105,7 @@ serve(async (req: Request): Promise<Response> => {
 
   if (event.type === "checkout.session.completed") {
     const session = event.data.object;
+    console.log("✅ Checkout session completed:", session.id);
 
     const itemsRes = await fetch(`https://api.stripe.com/v1/checkout/sessions/${session.id}/line_items`, {
       headers: { Authorization: `Bearer ${STRIPE_SECRET_TEST}` },
@@ -113,9 +117,12 @@ serve(async (req: Request): Promise<Response> => {
       return new Response("Failed to fetch line items", { status: 500, headers: corsHeaders });
     }
 
+    console.log("🧾 Stripe line items fetched:", itemsData.data);
+
     const items = await Promise.all(
       itemsData.data.map(async (item) => {
         const stripePriceId = item.price?.id;
+        console.log("🛠 Processing item with price ID:", stripePriceId);
         const variantId = await getMappedVariantId(stripePriceId);
         if (!variantId) return null;
 
@@ -129,6 +136,8 @@ serve(async (req: Request): Promise<Response> => {
     );
 
     const filteredItems = items.filter((i) => i !== null);
+    console.log("🧾 Final filtered items:", filteredItems);
+
     if (filteredItems.length === 0) {
       console.warn("⚠️ No valid items to send to Printful.");
       return new Response("No valid items to order", { status: 200, headers: corsHeaders });
@@ -149,6 +158,8 @@ serve(async (req: Request): Promise<Response> => {
       items: filteredItems,
       confirm: false,
     };
+
+    console.log("📦 Sending order to Printful:", JSON.stringify(printfulOrder, null, 2));
 
     const pfRes = await fetch("https://api.printful.com/orders", {
       method: "POST",
