@@ -2,13 +2,11 @@
 
 import { addToCart, getCart, updateCartUI } from "./cart.js";
 
-const isTest = true;
-
 const variantEndpoint = "https://busjhforwvqhuaivgbac.supabase.co/functions/v1/get-printful-variants";
 const priceLookupEndpoint = "https://busjhforwvqhuaivgbac.supabase.co/functions/v1/lookup-stripe-price";
 const checkoutEndpoint = "https://busjhforwvqhuaivgbac.supabase.co/functions/v1/create-checkout-session";
 
-export function loadVariants(productId, blockEl) {
+export function loadVariants(productId, blockEl, mode = "test") {
   console.log("🔍 Loading variants for product ID:", productId);
 
   const priceEl = blockEl.querySelector(".price");
@@ -18,9 +16,11 @@ export function loadVariants(productId, blockEl) {
   const addToCartBtn = blockEl.querySelector(".add-to-cart");
   const buyNowBtn = blockEl.querySelector(".buy-now");
 
-  if (!variantContainer || !colorContainer || !sizeContainer || !buyNowBtn || !addToCartBtn) {
+  if (!variantContainer || !colorContainer || !sizeContainer || !addToCartBtn || !buyNowBtn) {
     console.warn("⚠️ Missing variant UI containers in block:", blockEl);
-    variantContainer.innerHTML = "<p style='color:red;'>Missing UI container elements.</p>";
+    if (variantContainer) {
+      variantContainer.innerHTML = "<p style='color:red;'>Missing UI container elements.</p>";
+    }
     return;
   }
 
@@ -65,13 +65,13 @@ export function loadVariants(productId, blockEl) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           product_name: variant.stripe_product_name,
-          mode: isTest ? "test" : "live"
+          mode
         })
       });
 
       const data = await res.json();
-      if (data?.price_id) {
-        variant.stripe_price_id = data.price_id;
+      if (data?.stripe_price_id) {
+        variant.stripe_price_id = data.stripe_price_id;
       } else {
         console.warn("❌ No Stripe price found for:", variant.stripe_product_name);
       }
@@ -94,7 +94,7 @@ export function loadVariants(productId, blockEl) {
     updatePreviewImage(matched);
   }
 
-  const fullURL = `${variantEndpoint}?product_id=${productId}&mode=${isTest ? "test" : "live"}`;
+  const fullURL = `${variantEndpoint}?product_id=${productId}&mode=${mode}`;
   fetch(fullURL)
     .then(res => res.json())
     .then(data => {
@@ -180,7 +180,7 @@ export function loadVariants(productId, blockEl) {
     const payload = {
       line_items: [{ price: variant.stripe_price_id, quantity: 1 }],
       currency: "CAD",
-      environment: isTest ? "test" : "live"
+      environment: mode
     };
 
     fetch(checkoutEndpoint, {
@@ -202,23 +202,32 @@ export function loadVariants(productId, blockEl) {
   });
 }
 
-export function checkoutCart() {
+export function checkoutCart(mode = "test") {
   const cart = getCart();
-  const line_items = cart.map(item => ({
-    price: item.stripe_price_id,
-    quantity: item.quantity
-  }));
+
+  const line_items = cart
+    .filter(item => item.stripe_price_id)
+    .map(item => ({
+      stripe_price_id: item.stripe_price_id,
+      price: item.stripe_price_id,
+      quantity: item.quantity
+    }));
+
+  if (!line_items.length) {
+    alert("Your cart has no valid items to checkout.");
+    return;
+  }
 
   const payload = {
     line_items,
     currency: "CAD",
     email: localStorage.getItem("user_email"),
-    environment: isTest ? "test" : "live"
+    environment: mode
   };
 
   console.log("🧾 Initiating full cart checkout:", payload);
 
-  fetch(checkoutEndpoint, {
+  fetch("https://busjhforwvqhuaivgbac.supabase.co/functions/v1/create-checkout-session", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
@@ -229,6 +238,7 @@ export function checkoutCart() {
         window.location.href = data.url;
       } else {
         console.error("❌ Stripe session URL not returned. Response:", data);
+        alert("Checkout failed. Stripe price may be invalid.");
       }
     })
     .catch(err => {

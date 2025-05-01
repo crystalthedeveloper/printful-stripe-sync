@@ -4,6 +4,7 @@
 import { serve } from "https://deno.land/std@0.192.0/http/server.ts";
 
 const STRIPE_SECRET_TEST = Deno.env.get("STRIPE_SECRET_TEST");
+const STRIPE_SECRET_LIVE = Deno.env.get("STRIPE_SECRET_KEY");
 const STRIPE_WEBHOOK_SECRET_TEST = Deno.env.get("STRIPE_WEBHOOK_SECRET_TEST");
 const PRINTFUL_API_KEY = Deno.env.get("PRINTFUL_API_KEY");
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
@@ -112,9 +113,12 @@ serve(async (req: Request): Promise<Response> => {
   if (event.type === "checkout.session.completed") {
     const session = event.data.object;
     const mode: "test" | "live" = session.livemode ? "live" : "test";
+    const stripeSecret = mode === "live" ? STRIPE_SECRET_LIVE : STRIPE_SECRET_TEST;
+
+    console.log("📦 Webhook triggered for mode:", mode);
 
     const itemsRes = await fetch(`https://api.stripe.com/v1/checkout/sessions/${session.id}/line_items`, {
-      headers: { Authorization: `Bearer ${STRIPE_SECRET_TEST}` },
+      headers: { Authorization: `Bearer ${stripeSecret}` },
     });
 
     const itemsData: StripeLineItemResponse = await itemsRes.json();
@@ -131,7 +135,7 @@ serve(async (req: Request): Promise<Response> => {
 
         const fileUrl = await getPrintfulImageURL(variantMapping.printful_store_variant_id);
         return {
-          variant_id: Number(variantMapping.printful_store_variant_id), // ✅ this is the actual fix
+          variant_id: Number(variantMapping.printful_store_variant_id),
           quantity: item.quantity,
           ...(fileUrl ? { files: [{ url: fileUrl }] } : {}),
         };

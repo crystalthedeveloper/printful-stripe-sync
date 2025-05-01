@@ -2,9 +2,8 @@
 
 import Stripe from "https://esm.sh/stripe@12.1.0?target=deno";
 
-const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY")!, {
-  apiVersion: "2023-10-16",
-});
+const STRIPE_SECRET_TEST = Deno.env.get("STRIPE_SECRET_TEST");
+const STRIPE_SECRET_LIVE = Deno.env.get("STRIPE_SECRET_KEY");
 
 interface LookupRequest {
   product_name: string;
@@ -42,20 +41,36 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   const { product_name, mode } = body;
 
-  if (!product_name || !mode) {
-    return new Response(JSON.stringify({ error: "Missing product_name or mode" }), {
+  if (!product_name || !mode || !["test", "live"].includes(mode)) {
+    return new Response(JSON.stringify({ error: "Missing or invalid product_name or mode" }), {
       status: 400,
       headers: corsHeaders,
     });
   }
 
+  const STRIPE_SECRET = mode === "live" ? STRIPE_SECRET_LIVE : STRIPE_SECRET_TEST;
+
+  if (!STRIPE_SECRET) {
+    return new Response(JSON.stringify({ error: `Stripe key for mode '${mode}' is not set` }), {
+      status: 500,
+      headers: corsHeaders,
+    });
+  }
+
+  const stripe = new Stripe(STRIPE_SECRET, {
+    apiVersion: "2023-10-16",
+  });
+
   try {
+    const normalized = product_name.trim().toLowerCase();
+
     const products = await stripe.products.list({ limit: 100 });
 
-    const normalizedName = product_name.trim().toLowerCase();
-    const product = products.data.find(
-      (p: Stripe.Product) => p.name.trim().toLowerCase() === normalizedName
-    );
+    const product = products.data.find((p: Stripe.Product) => {
+      const nameMatch = p.name.trim().toLowerCase() === normalized;
+      const metaMatch = (p.metadata?.printful_variant_name || "").trim().toLowerCase() === normalized;
+      return nameMatch || metaMatch;
+    });
 
     if (!product) {
       return new Response(JSON.stringify({ error: "Product not found" }), {
@@ -65,19 +80,33 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     const prices = await stripe.prices.list({ product: product.id, limit: 1 });
-    const priceId = prices.data[0]?.id;
 
-    if (!priceId) {
+    if (!prices.data.length || !prices.data[0].id) {
       return new Response(JSON.stringify({ error: "No price found for product" }), {
         status: 404,
         headers: corsHeaders,
       });
     }
 
-    return new Response(JSON.stringify({ stripe_price_id: priceId }), {
-      status: 200,
-      headers: corsHeaders,
-    });
+    const price = prices.data[0];
+
+    return new Response(
+      JSON.stringify({
+        stripe_price_id: price.id,
+        currency: price.currency,
+        amount: price.unit_amount,
+        metadata: price.metadata,
+        product: {
+          id: product.id,
+          name: product.name,
+          metadata: product.metadata,
+        },
+      }),
+      {
+        status: 200,
+        headers: corsHeaders,
+      }
+    );
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unexpected error";
     return new Response(JSON.stringify({ error: message }), {

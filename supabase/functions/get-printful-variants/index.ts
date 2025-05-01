@@ -22,7 +22,7 @@ interface PrintfulSyncVariant {
   files?: PrintfulVariantFile[];
 }
 
-interface PrintfulAPIResponse {
+interface PrintfulProductResponse {
   result: {
     sync_variants: PrintfulSyncVariant[];
   };
@@ -62,19 +62,18 @@ Deno.serve(async (req: Request): Promise<Response> => {
       });
     }
 
-    const product: PrintfulAPIResponse = await res.json();
-    const syncVariants = product.result?.sync_variants ?? [];
+    const product: PrintfulProductResponse = await res.json();
+    const syncVariants: PrintfulSyncVariant[] = product.result?.sync_variants ?? [];
 
     const variants = syncVariants.map((v) => {
       const previewFile = v.files?.find((f) => f.type === "preview");
-
-      const baseCode = v.name.split("/")[0].trim(); // e.g. "02P"
-      const fullStripeName = `${baseCode} - ${v.name}`; // "02P - 02P / S"
+      const baseCode = v.name.split("/")[0].trim();            // e.g. "02P"
+      const fullStripeName = `${baseCode} - ${v.name}`;         // "02P - 02P / S"
 
       return {
         printful_store_variant_id: v.id,
-        variant_name: v.name,                   // "02P / S"
-        stripe_product_name: fullStripeName,    // "02P - 02P / S"
+        variant_name: v.name,
+        stripe_product_name: fullStripeName,
         size: v.size,
         color: v.color,
         available: v.available !== false,
