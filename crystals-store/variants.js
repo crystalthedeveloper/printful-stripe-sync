@@ -112,7 +112,6 @@ export function loadVariants(productId, blockEl) {
       console.error("❌ Failed to load variants:", err);
     });
 
-  // 🛒 Add to Cart
   addToCartBtn.addEventListener("click", () => {
     const variant = findMatchingVariant();
     if (!variant || !variant.stripe_price_id) {
@@ -135,7 +134,6 @@ export function loadVariants(productId, blockEl) {
     if (modal) modal.classList.remove("hidden");
   });
 
-  // 💳 Buy Now
   buyNowBtn.addEventListener("click", () => {
     const variant = findMatchingVariant();
     if (!variant || !variant.stripe_price_id) {
@@ -146,11 +144,7 @@ export function loadVariants(productId, blockEl) {
     const payload = {
       line_items: [{
         price: variant.stripe_price_id,
-        quantity: 1,
-        name: variant.variant_name || "",
-        color: variant.color || "N/A",
-        size: variant.size || "N/A",
-        image: variant.image_url || ""
+        quantity: 1
       }],
       currency: "CAD",
       environment: isTest ? "test" : "live"
@@ -175,16 +169,11 @@ export function loadVariants(productId, blockEl) {
   });
 }
 
-// 🧾 Full Cart Checkout
 export function checkoutCart() {
   const cart = getCart();
   const line_items = cart.map(item => ({
     price: item.stripe_price_id,
-    quantity: item.quantity,
-    name: item.name,
-    color: item.color,
-    size: item.size,
-    image: item.image
+    quantity: item.quantity
   }));
 
   const payload = {

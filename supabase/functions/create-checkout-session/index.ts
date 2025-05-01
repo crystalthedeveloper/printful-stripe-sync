@@ -1,7 +1,11 @@
-// Supabase Edge Function: create-checkout-session.ts
-// Creates a Stripe Checkout session with Stripe API (test or live)
-
+// create-checkout-session.ts — Stripe + Printful Only (No Supabase)
 import { serve } from "https://deno.land/std@0.192.0/http/server.ts";
+
+// ✅ Change this to "live" when ready to go live
+const MODE: "test" | "live" = "test";
+
+const STRIPE_SECRET_TEST = Deno.env.get("STRIPE_SECRET_TEST");
+const STRIPE_SECRET_LIVE = Deno.env.get("STRIPE_SECRET_KEY");
 
 const stripeEndpoint = "https://api.stripe.com/v1/checkout/sessions";
 
@@ -9,13 +13,12 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "https://www.crystalthedeveloper.ca",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
-  "Content-Type": "application/json",
+  "Content-Type": "application/json"
 };
 
-const STRIPE_SECRET_LIVE = Deno.env.get("STRIPE_SECRET_KEY");
-const STRIPE_SECRET_TEST = Deno.env.get("STRIPE_SECRET_TEST");
+const STRIPE_SECRET_KEY = MODE === "test" ? STRIPE_SECRET_TEST : STRIPE_SECRET_LIVE;
 
-serve(async (req: Request): Promise<Response> => {
+serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("OK", { status: 200, headers: corsHeaders });
   }
@@ -31,73 +34,45 @@ serve(async (req: Request): Promise<Response> => {
     const {
       line_items,
       email,
-      environment = "live",
-      mode = "payment",
       success_url = "https://www.crystalthedeveloper.ca/store/success",
       cancel_url = "https://www.crystalthedeveloper.ca/store/cancel",
-      shipping_countries = ["US", "CA"],
+      shipping_countries = ["US", "CA"]
     } = await req.json();
 
-    console.log("📦 Incoming request payload:", {
-      environment,
-      line_items,
-      email,
-      mode,
-      success_url,
-      cancel_url,
-      shipping_countries,
-    });
-
     if (!Array.isArray(line_items) || line_items.length === 0) {
-      console.error("❌ No line_items provided.");
-      return new Response(JSON.stringify({ error: "Missing line_items" }), {
+      return new Response(JSON.stringify({ error: "Missing or invalid line_items" }), {
         status: 400,
         headers: corsHeaders,
       });
     }
 
-    const STRIPE_SECRET_KEY = environment === "test" ? STRIPE_SECRET_TEST : STRIPE_SECRET_LIVE;
-
     if (!STRIPE_SECRET_KEY) {
-      return new Response(JSON.stringify({ error: `Missing Stripe secret for ${environment}` }), {
+      return new Response(JSON.stringify({ error: `Missing Stripe secret for ${MODE}` }), {
         status: 500,
         headers: corsHeaders,
       });
     }
 
-    console.log("🔐 Using environment:", environment);
-    console.log("🔑 STRIPE_SECRET_KEY starts with:", STRIPE_SECRET_KEY?.slice(0, 8));
-
-    interface LineItem {
-      price?: string;
-      stripe_price_id?: string;
-      quantity?: number;
-    }
-
     const formData = new URLSearchParams();
-    formData.append("mode", mode);
+    formData.append("mode", "payment");
     formData.append("success_url", success_url);
     formData.append("cancel_url", cancel_url);
     formData.append("payment_method_types[0]", "card");
 
     let validItems = 0;
-
-    line_items.forEach((item: LineItem, index: number) => {
+    line_items.forEach((item, index) => {
       const priceId = item.price || item.stripe_price_id;
       if (!priceId) {
-        console.warn(`⚠️ Missing price for item at index ${index}:`, item);
+        console.warn(`⚠️ Skipping item without price ID at index ${index}`, item);
         return;
       }
-
-      console.log(`✅ Adding line item ${index}:`, { priceId, quantity: item.quantity || 1 });
       formData.append(`line_items[${index}][price]`, priceId);
       formData.append(`line_items[${index}][quantity]`, String(item.quantity || 1));
       validItems++;
     });
 
     if (validItems === 0) {
-      console.error("❌ No valid line items with Stripe price IDs were found.");
-      return new Response(JSON.stringify({ error: "No valid line items with Stripe price IDs." }), {
+      return new Response(JSON.stringify({ error: "No valid Stripe price IDs in line_items" }), {
         status: 400,
         headers: corsHeaders,
       });
@@ -105,16 +80,14 @@ serve(async (req: Request): Promise<Response> => {
 
     shipping_countries.forEach((code: string, i: number) => {
       formData.append(`shipping_address_collection[allowed_countries][${i}]`, code);
-    });
+    });    
 
     if (email) {
       formData.append("customer_email", email);
     }
 
-    // ✅ Add environment to metadata for webhook to read
-    formData.append("metadata[mode]", environment);
-
-    console.log("📤 Sending formData to Stripe:", formData.toString());
+    // Add mode as metadata for webhook filtering
+    formData.append("metadata[mode]", MODE);
 
     const stripeRes = await fetch(stripeEndpoint, {
       method: "POST",
@@ -128,7 +101,7 @@ serve(async (req: Request): Promise<Response> => {
     const stripeData = await stripeRes.json();
 
     if (!stripeRes.ok || !stripeData.url) {
-      console.error("❌ Stripe Error Response:", stripeData);
+      console.error("❌ Stripe Error:", stripeData);
       return new Response(JSON.stringify({
         error: stripeData.error?.message || "Stripe session creation failed"
       }), {
@@ -137,14 +110,12 @@ serve(async (req: Request): Promise<Response> => {
       });
     }
 
-    console.log("✅ Stripe session created successfully:", stripeData.url);
-
     return new Response(JSON.stringify({ url: stripeData.url }), {
       status: 200,
       headers: corsHeaders,
     });
 
-  } catch (err: unknown) {
+  } catch (err) {
     const message = err instanceof Error ? err.message : "Unexpected server error";
     console.error("❌ Unexpected error:", err);
     return new Response(JSON.stringify({ error: message }), {

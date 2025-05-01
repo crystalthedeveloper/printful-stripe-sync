@@ -16,50 +16,38 @@ const corsHeaders = {
   "Content-Type": "application/json",
 };
 
-type StripeShipping = {
-  name?: string;
-  address?: {
-    line1?: string;
-    line2?: string;
-    city?: string;
-    state?: string;
-    country?: string;
-    postal_code?: string;
-  };
-};
-
-type StripeCustomerDetails = { email?: string };
 type StripeSession = {
   id: string;
   livemode: boolean;
-  shipping_details?: StripeShipping;
-  customer_details?: StripeCustomerDetails;
+  shipping_details?: {
+    name?: string;
+    address?: {
+      line1?: string;
+      line2?: string;
+      city?: string;
+      state?: string;
+      country?: string;
+      postal_code?: string;
+    };
+  };
+  customer_details?: { email?: string };
 };
-type StripeEvent = { type: "checkout.session.completed"; data: { object: StripeSession } };
+
 type StripeLineItem = { quantity: number; price: { id: string } };
 type StripeLineItemResponse = { data: StripeLineItem[] };
+type StripeEvent = { type: "checkout.session.completed"; data: { object: StripeSession } };
 
-interface PrintfulFile { type: string; url: string; }
-interface PrintfulVariantResponse { result?: { files?: PrintfulFile[] }; }
+interface PrintfulFile { type: string; preview_url?: string }
+interface PrintfulVariantResponse { result?: { files?: PrintfulFile[] } }
 
-async function getPrintfulImageURL(variantId: number): Promise<string | null> {
-  console.log(`🔍 Getting Printful image for variant ID: ${variantId}`);
-  const res = await fetch(`https://api.printful.com/products/variant/${variantId}`, {
-    headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
-  });
-  const data: PrintfulVariantResponse = await res.json();
-  if (!res.ok || !data.result?.files) {
-    console.error(`❌ Failed to fetch variant ${variantId}:`, data);
-    return null;
-  }
-  const file = data.result.files.find((f) => f.type === "default");
-  return file?.url ?? null;
+interface VariantMapping {
+  printful_catalog_variant_id: string;
+  printful_store_variant_id: string;
 }
 
-async function getMappedVariantId(stripePriceId: string, mode: "test" | "live"): Promise<number | null> {
-  console.log(`🔁 Getting mapped Printful variant for Stripe price ID: ${stripePriceId} (mode: ${mode})`);
+async function getMappedVariant(stripePriceId: string, mode: "test" | "live"): Promise<VariantMapping | null> {
   const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/variant_mappings?stripe_price_id=eq.${stripePriceId}&mode=eq.${mode}`,
+    `${SUPABASE_URL}/rest/v1/variant_mappings?select=printful_catalog_variant_id,printful_store_variant_id&stripe_price_id=eq.${stripePriceId}&mode=eq.${mode}`,
     {
       headers: {
         apikey: SUPABASE_SERVICE_ROLE_KEY!,
@@ -75,8 +63,25 @@ async function getMappedVariantId(stripePriceId: string, mode: "test" | "live"):
     return null;
   }
 
-  console.log(`✅ Found Printful variant ID ${data[0].printful_variant_id}`);
-  return Number(data[0].printful_variant_id);
+  return {
+    printful_catalog_variant_id: data[0].printful_catalog_variant_id,
+    printful_store_variant_id: data[0].printful_store_variant_id,
+  };
+}
+
+async function getPrintfulImageURL(storeVariantId: string): Promise<string | null> {
+  const res = await fetch(`https://api.printful.com/store/variants/${storeVariantId}`, {
+    headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
+  });
+
+  const data: PrintfulVariantResponse = await res.json();
+  if (!res.ok || !data.result?.files) {
+    console.error(`❌ Failed to fetch image for store variant ${storeVariantId}:`, data);
+    return null;
+  }
+
+  const file = data.result.files.find(f => f.type === "preview");
+  return file?.preview_url ?? null;
 }
 
 serve(async (req: Request): Promise<Response> => {
@@ -96,11 +101,9 @@ serve(async (req: Request): Promise<Response> => {
     return new Response("Invalid Stripe signature", { status: 401, headers: corsHeaders });
   }
 
-  const bodyText = new TextDecoder().decode(bodyBuffer);
   let event: StripeEvent;
-
   try {
-    event = JSON.parse(bodyText);
+    event = JSON.parse(new TextDecoder().decode(bodyBuffer));
   } catch (err) {
     console.error("❌ JSON parse error:", err);
     return new Response("Invalid JSON", { status: 400, headers: corsHeaders });
@@ -110,42 +113,33 @@ serve(async (req: Request): Promise<Response> => {
     const session = event.data.object;
     const mode: "test" | "live" = session.livemode ? "live" : "test";
 
-    console.log("✅ Checkout session completed:", session.id);
-    console.log("🌐 Stripe session livemode:", session.livemode);
-    console.log("🔄 Using Supabase variant mapping mode:", mode);
-
     const itemsRes = await fetch(`https://api.stripe.com/v1/checkout/sessions/${session.id}/line_items`, {
-      headers: { Authorization: `Bearer ${STRIPE_SECRET_TEST}` }, // Using TEST key to retrieve session data
+      headers: { Authorization: `Bearer ${STRIPE_SECRET_TEST}` },
     });
 
     const itemsData: StripeLineItemResponse = await itemsRes.json();
     if (!itemsRes.ok) {
-      console.error("❌ Stripe line item fetch error", itemsData);
+      console.error("❌ Failed to fetch line items:", itemsData);
       return new Response("Failed to fetch line items", { status: 500, headers: corsHeaders });
     }
 
-    console.log("🧾 Stripe line items fetched:", itemsData.data);
-
     const items = await Promise.all(
       itemsData.data.map(async (item) => {
-        const stripePriceId = item.price?.id;
-        console.log("🛠 Processing item with price ID:", stripePriceId);
-        const variantId = await getMappedVariantId(stripePriceId, mode);
-        if (!variantId) return null;
+        const stripePriceId = item.price.id;
+        const variantMapping = await getMappedVariant(stripePriceId, mode);
+        if (!variantMapping) return null;
 
-        const fileUrl = await getPrintfulImageURL(variantId);
+        const fileUrl = await getPrintfulImageURL(variantMapping.printful_store_variant_id);
         return {
-          variant_id: variantId,
+          variant_id: Number(variantMapping.printful_store_variant_id), // ✅ this is the actual fix
           quantity: item.quantity,
           ...(fileUrl ? { files: [{ url: fileUrl }] } : {}),
         };
       })
     );
 
-    const filteredItems = items.filter((i) => i !== null);
-    console.log("🧾 Final filtered items:", filteredItems);
-
-    if (filteredItems.length === 0) {
+    const filteredItems = items.filter(Boolean);
+    if (!filteredItems.length) {
       console.warn("⚠️ No valid items to send to Printful.");
       return new Response("No valid items to order", { status: 200, headers: corsHeaders });
     }
@@ -166,8 +160,6 @@ serve(async (req: Request): Promise<Response> => {
       confirm: false,
     };
 
-    console.log("📦 Sending order to Printful:", JSON.stringify(printfulOrder, null, 2));
-
     const pfRes = await fetch("https://api.printful.com/orders", {
       method: "POST",
       headers: {
@@ -183,7 +175,7 @@ serve(async (req: Request): Promise<Response> => {
       return new Response(JSON.stringify(pfData), { status: 500, headers: corsHeaders });
     }
 
-    console.log("✅ Draft order created in Printful:", pfData);
+    console.log("✅ Printful draft order created:", pfData);
   }
 
   return new Response(JSON.stringify({ received: true }), { status: 200, headers: corsHeaders });
@@ -208,8 +200,7 @@ async function verifyStripeSignature(
   const signature = parts["v1"];
   if (!timestamp || !signature) return false;
 
-  const rawPayload = new TextDecoder().decode(payload);
-  const signedPayload = `${timestamp}.${rawPayload}`;
+  const signedPayload = `${timestamp}.${new TextDecoder().decode(payload)}`;
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const signatureBuffer = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(signedPayload));
   const computedSignature = Array.from(new Uint8Array(signatureBuffer)).map((b) => b.toString(16).padStart(2, "0")).join("");
