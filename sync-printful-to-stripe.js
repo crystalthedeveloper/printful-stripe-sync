@@ -6,7 +6,7 @@ import Stripe from "stripe";
 import fetch from "node-fetch";
 dotenv.config();
 
-const MODE = process.env.MODE || "test"; // Set to "live" or "test"
+const MODE = process.env.MODE || "test"; // "live" or "test"
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const PRINTFUL_API_KEY = process.env.PRINTFUL_API_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -15,24 +15,24 @@ const DRY_RUN = process.env.DRY_RUN === "true";
 
 const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
 
-async function getPrintfulImageURLFromProduct(productId, variantId) {
+async function getPrintfulImageURLFromProduct(productId, storeVariantId) {
   try {
     const res = await fetch(`https://api.printful.com/sync/products/${productId}`, {
       headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
     });
     if (!res.ok) return null;
     const data = await res.json();
-    const variant = data.result?.sync_variants?.find(v => v.id === variantId);
+    const variant = data.result?.sync_variants?.find(v => v.id === storeVariantId);
     const image = variant?.files?.find(f => f.type === "preview");
     return image?.preview_url || null;
   } catch (err) {
-    console.warn(`⚠️ Could not fetch image for variant ${variantId}: ${err.message}`);
+    console.warn(`⚠️ Could not fetch image for variant ${storeVariantId}: ${err.message}`);
     return null;
   }
 }
 
-async function getExistingMappings(variantId) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/variant_mappings?printful_variant_id=eq.${variantId}&mode=eq.${MODE}`, {
+async function getExistingMappings(storeVariantId) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/variant_mappings?printful_store_variant_id=eq.${storeVariantId}&mode=eq.${MODE}`, {
     headers: {
       apikey: SUPABASE_SERVICE_ROLE_KEY,
       Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
@@ -64,7 +64,8 @@ async function sync() {
 
     for (const variant of syncVariants) {
       const {
-        id: printful_variant_id,
+        id: printful_store_variant_id,
+        variant_id: printful_catalog_variant_id,
         name: variantName,
         retail_price,
         is_ignored,
@@ -74,15 +75,16 @@ async function sync() {
 
       if (is_deleted || is_ignored) continue;
 
-      const imageUrl = await getPrintfulImageURLFromProduct(product.id, printful_variant_id);
+      const image_url = await getPrintfulImageURLFromProduct(product.id, printful_store_variant_id);
       const color = options?.find(o => o.id === "color")?.value || "";
       const size = options?.find(o => o.id === "size")?.value || "";
 
-      const existing = await getExistingMappings(printful_variant_id);
+      const existing = await getExistingMappings(printful_store_variant_id);
       const data = {
-        printful_variant_id: printful_variant_id.toString(),
+        printful_store_variant_id: printful_store_variant_id.toString(),
+        printful_catalog_variant_id: printful_catalog_variant_id?.toString(),
         retail_price: parseFloat(retail_price),
-        image_url: imageUrl,
+        image_url,
         color,
         size,
         variant_name: variantName,
@@ -120,7 +122,7 @@ async function sync() {
           data.stripe_price_id = stripePrice.id;
           insertMappings.push(data);
         } catch (err) {
-          console.error(`❌ Stripe error for ${printful_variant_id}: ${err.message}`);
+          console.error(`❌ Stripe error for ${printful_store_variant_id}: ${err.message}`);
         }
       }
     }

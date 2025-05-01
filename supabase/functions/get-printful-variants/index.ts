@@ -1,6 +1,5 @@
 // Supabase Edge Function: get-printful-variants.ts
 // Fetches product variants from Printful and enriches them with Stripe price mapping from Supabase
-
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
 const PRINTFUL_API_KEY = Deno.env.get("PRINTFUL_API_KEY");
@@ -22,7 +21,7 @@ interface SyncVariant {
 }
 
 interface Mapping {
-  printful_variant_id: number;
+  printful_store_variant_id: number;
   stripe_price_id: string;
   image_url: string;
 }
@@ -30,6 +29,7 @@ interface Mapping {
 Deno.serve(async (req: Request): Promise<Response> => {
   const { searchParams } = new URL(req.url);
   const productId = searchParams.get("product_id");
+  const mode = searchParams.get("mode") === "test" ? "test" : "live";
 
   if (!PRINTFUL_API_KEY || !SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
     console.error("❌ Missing environment variable.");
@@ -47,7 +47,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   try {
-    // 1. Fetch product + variants from Printful
+    // 1. Fetch product from Printful
     const res = await fetch(`https://api.printful.com/store/products/${productId}`, {
       headers: {
         Authorization: `Bearer ${PRINTFUL_API_KEY}`,
@@ -66,10 +66,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const product = await res.json();
     const syncVariants: SyncVariant[] = product.result.sync_variants;
 
-    // 2. Fetch mappings from Supabase with image_url
+    // 2. Fetch Supabase mappings with mode and new column name
     const variantIds = syncVariants.map((v) => v.id).join(",");
     const mappingRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/variant_mappings?select=printful_variant_id,stripe_price_id,image_url&printful_variant_id=in.(${variantIds})`,
+      `${SUPABASE_URL}/rest/v1/variant_mappings?select=printful_store_variant_id,stripe_price_id,image_url&printful_store_variant_id=in.(${variantIds})&mode=eq.${mode}`,
       {
         headers: {
           apikey: SUPABASE_SERVICE_ROLE_KEY,
@@ -81,15 +81,18 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     const mappings: Mapping[] = await mappingRes.json();
     const mappingMap = new Map(
-      mappings.map((m) => [String(m.printful_variant_id), { stripe_price_id: m.stripe_price_id, image_url: m.image_url }])
+      mappings.map((m) => [String(m.printful_store_variant_id), {
+        stripe_price_id: m.stripe_price_id,
+        image_url: m.image_url
+      }])
     );
 
     // 3. Merge Printful + Supabase data
     const variants = syncVariants.map((v) => {
       const mapping = mappingMap.get(String(v.id));
       return {
-        id: v.id,
-        variant_name: v.name, // ✅ Use `variant_name` instead of `name`
+        printful_store_variant_id: v.id,
+        variant_name: v.name,
         size: v.size,
         color: v.color,
         available: v.available !== false,

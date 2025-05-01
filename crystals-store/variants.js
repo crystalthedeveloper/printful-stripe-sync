@@ -4,10 +4,7 @@ import { addToCart, getCart, updateCartUI } from "./cart.js";
 
 const isTest = true;
 
-const endpoint = isTest
-  ? "https://busjhforwvqhuaivgbac.supabase.co/functions/v1/get-printful-variants-test"
-  : "https://busjhforwvqhuaivgbac.supabase.co/functions/v1/get-printful-variants";
-
+const endpoint = "https://busjhforwvqhuaivgbac.supabase.co/functions/v1/get-printful-variants";
 const checkoutEndpoint = "https://busjhforwvqhuaivgbac.supabase.co/functions/v1/create-checkout-session";
 
 export function loadVariants(productId, blockEl) {
@@ -66,7 +63,7 @@ export function loadVariants(productId, blockEl) {
     updatePreviewImage(matched);
   }
 
-  fetch(`${endpoint}?product_id=${productId}`)
+  fetch(`${endpoint}?product_id=${productId}&mode=${isTest ? "test" : "live"}`)
     .then(res => res.json())
     .then(data => {
       allVariants = data?.variants || [];
@@ -124,7 +121,7 @@ export function loadVariants(productId, blockEl) {
     }
 
     addToCart({
-      variant_id: variant.printful_variant_id,
+      variant_id: variant.printful_store_variant_id,
       stripe_price_id: variant.stripe_price_id,
       name: variant.variant_name || "Unnamed Product",
       image: variant.image_url || "",
@@ -137,7 +134,6 @@ export function loadVariants(productId, blockEl) {
     const modal = document.getElementById("cart-modal");
     if (modal) modal.classList.remove("hidden");
   });
-
 
   // 💳 Buy Now
   buyNowBtn.addEventListener("click", () => {
@@ -160,8 +156,6 @@ export function loadVariants(productId, blockEl) {
       environment: isTest ? "test" : "live"
     };
 
-    console.log("🧾 Sending Buy Now checkout payload:", payload);
-
     fetch(checkoutEndpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -170,10 +164,9 @@ export function loadVariants(productId, blockEl) {
       .then(res => res.json())
       .then(data => {
         if (data?.url) {
-          console.log("✅ Redirecting to Stripe:", data.url);
           window.location.href = data.url;
         } else {
-          console.error("❌ No URL returned from checkout session. Response:", data);
+          console.error("❌ No URL returned from checkout session:", data);
         }
       })
       .catch(err => {
@@ -182,7 +175,7 @@ export function loadVariants(productId, blockEl) {
   });
 }
 
-// 🧾 Full Cart Checkout Handler
+// 🧾 Full Cart Checkout
 export function checkoutCart() {
   const cart = getCart();
   const line_items = cart.map(item => ({
@@ -201,8 +194,6 @@ export function checkoutCart() {
     environment: isTest ? "test" : "live"
   };
 
-  console.log("🧾 Sending Cart checkout payload:", payload);
-
   fetch(checkoutEndpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -211,7 +202,6 @@ export function checkoutCart() {
     .then(res => res.json())
     .then(data => {
       if (data?.url) {
-        console.log("✅ Redirecting to Stripe from cart:", data.url);
         window.location.href = data.url;
       } else {
         console.error("❌ Stripe session URL not returned. Response:", data);
