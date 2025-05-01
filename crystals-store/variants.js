@@ -4,10 +4,13 @@ import { addToCart, getCart, updateCartUI } from "./cart.js";
 
 const isTest = true;
 
-const endpoint = "https://busjhforwvqhuaivgbac.supabase.co/functions/v1/get-printful-variants";
+const variantEndpoint = "https://busjhforwvqhuaivgbac.supabase.co/functions/v1/get-printful-variants";
+const priceLookupEndpoint = "https://busjhforwvqhuaivgbac.supabase.co/functions/v1/lookup-stripe-price";
 const checkoutEndpoint = "https://busjhforwvqhuaivgbac.supabase.co/functions/v1/create-checkout-session";
 
 export function loadVariants(productId, blockEl) {
+  console.log("🔍 Loading variants for product ID:", productId);
+
   const priceEl = blockEl.querySelector(".price");
   const variantContainer = blockEl.querySelector(".variant-output");
   const colorContainer = blockEl.querySelector(".color-options");
@@ -15,7 +18,11 @@ export function loadVariants(productId, blockEl) {
   const addToCartBtn = blockEl.querySelector(".add-to-cart");
   const buyNowBtn = blockEl.querySelector(".buy-now");
 
-  if (!variantContainer || !colorContainer || !sizeContainer || !buyNowBtn || !addToCartBtn) return;
+  if (!variantContainer || !colorContainer || !sizeContainer || !buyNowBtn || !addToCartBtn) {
+    console.warn("⚠️ Missing variant UI containers in block:", blockEl);
+    variantContainer.innerHTML = "<p style='color:red;'>Missing UI container elements.</p>";
+    return;
+  }
 
   let selectedSize = null;
   let selectedColor = null;
@@ -36,10 +43,9 @@ export function loadVariants(productId, blockEl) {
   }
 
   function updatePriceDisplay(variant) {
-    if (!priceEl) return;
-    priceEl.textContent = variant?.retail_price
-      ? `$${parseFloat(variant.retail_price).toFixed(2)} CAD`
-      : "$0 CAD";
+    if (priceEl && variant?.retail_price) {
+      priceEl.textContent = `$${parseFloat(variant.retail_price).toFixed(2)} CAD`;
+    }
   }
 
   function updatePreviewImage(variant) {
@@ -50,10 +56,35 @@ export function loadVariants(productId, blockEl) {
     }
   }
 
-  function updateButtons() {
-    const matched = findMatchingVariant();
-    const enable = !!matched;
+  async function updateStripePriceId(variant) {
+    if (variant?.stripe_price_id || !variant?.stripe_product_name) return;
 
+    try {
+      const res = await fetch(priceLookupEndpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          product_name: variant.stripe_product_name,
+          mode: isTest ? "test" : "live"
+        })
+      });
+
+      const data = await res.json();
+      if (data?.price_id) {
+        variant.stripe_price_id = data.price_id;
+      } else {
+        console.warn("❌ No Stripe price found for:", variant.stripe_product_name);
+      }
+    } catch (err) {
+      console.error("❌ Stripe price lookup failed:", err);
+    }
+  }
+
+  async function updateButtons() {
+    const matched = findMatchingVariant();
+    await updateStripePriceId(matched);
+
+    const enable = !!(matched && matched.stripe_price_id);
     buyNowBtn.disabled = !enable;
     addToCartBtn.disabled = !enable;
     buyNowBtn.classList.toggle("disabled", !enable);
@@ -63,7 +94,8 @@ export function loadVariants(productId, blockEl) {
     updatePreviewImage(matched);
   }
 
-  fetch(`${endpoint}?product_id=${productId}&mode=${isTest ? "test" : "live"}`)
+  const fullURL = `${variantEndpoint}?product_id=${productId}&mode=${isTest ? "test" : "live"}`;
+  fetch(fullURL)
     .then(res => res.json())
     .then(data => {
       allVariants = data?.variants || [];
@@ -91,18 +123,18 @@ export function loadVariants(productId, blockEl) {
       ).join("");
 
       colorContainer.querySelectorAll(".color-option:not(.disabled)").forEach(span => {
-        span.addEventListener("click", () => {
+        span.addEventListener("click", async () => {
           selectedColor = span.dataset.value;
           updateSelectedStyle("color", selectedColor);
-          updateButtons();
+          await updateButtons();
         });
       });
 
       sizeContainer.querySelectorAll(".size-option:not(.disabled)").forEach(span => {
-        span.addEventListener("click", () => {
+        span.addEventListener("click", async () => {
           selectedSize = span.dataset.value;
           updateSelectedStyle("size", selectedSize);
-          updateButtons();
+          await updateButtons();
         });
       });
 
@@ -112,9 +144,11 @@ export function loadVariants(productId, blockEl) {
       console.error("❌ Failed to load variants:", err);
     });
 
-  addToCartBtn.addEventListener("click", () => {
+  addToCartBtn.addEventListener("click", async () => {
     const variant = findMatchingVariant();
-    if (!variant || !variant.stripe_price_id) {
+    await updateStripePriceId(variant);
+
+    if (!variant?.stripe_price_id) {
       console.warn("⚠️ No Stripe price ID on Add to Cart variant:", variant);
       return;
     }
@@ -134,18 +168,17 @@ export function loadVariants(productId, blockEl) {
     if (modal) modal.classList.remove("hidden");
   });
 
-  buyNowBtn.addEventListener("click", () => {
+  buyNowBtn.addEventListener("click", async () => {
     const variant = findMatchingVariant();
-    if (!variant || !variant.stripe_price_id) {
-      console.error("❌ No valid Stripe price ID for selected variant:", variant);
+    await updateStripePriceId(variant);
+
+    if (!variant?.stripe_price_id) {
+      console.error("❌ No Stripe price ID for Buy Now:", variant);
       return;
     }
 
     const payload = {
-      line_items: [{
-        price: variant.stripe_price_id,
-        quantity: 1
-      }],
+      line_items: [{ price: variant.stripe_price_id, quantity: 1 }],
       currency: "CAD",
       environment: isTest ? "test" : "live"
     };
@@ -182,6 +215,8 @@ export function checkoutCart() {
     email: localStorage.getItem("user_email"),
     environment: isTest ? "test" : "live"
   };
+
+  console.log("🧾 Initiating full cart checkout:", payload);
 
   fetch(checkoutEndpoint, {
     method: "POST",

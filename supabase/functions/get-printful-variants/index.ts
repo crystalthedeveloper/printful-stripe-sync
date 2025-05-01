@@ -1,5 +1,4 @@
-// Supabase Edge Function: get-printful-variants.ts
-// get-printful-variants.ts (Stripe + Printful Only)
+// get-printful-variants.ts (Stripe + Printful Only, no `any`)
 
 const PRINTFUL_API_KEY = Deno.env.get("PRINTFUL_API_KEY");
 
@@ -7,6 +6,27 @@ const corsHeaders = {
   "Content-Type": "application/json",
   "Access-Control-Allow-Origin": "*",
 };
+
+interface PrintfulVariantFile {
+  type: string;
+  preview_url?: string;
+}
+
+interface PrintfulSyncVariant {
+  id: number;
+  name: string;
+  size: string;
+  color: string;
+  available: boolean;
+  retail_price: string;
+  files?: PrintfulVariantFile[];
+}
+
+interface PrintfulAPIResponse {
+  result: {
+    sync_variants: PrintfulSyncVariant[];
+  };
+}
 
 Deno.serve(async (req: Request): Promise<Response> => {
   const { searchParams } = new URL(req.url);
@@ -42,14 +62,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
       });
     }
 
-    const product = await res.json();
-    const syncVariants = product.result?.sync_variants || [];
+    const product: PrintfulAPIResponse = await res.json();
+    const syncVariants = product.result?.sync_variants ?? [];
 
-    const variants = syncVariants.map((v: any) => {
-      const previewFile = v.files?.find((f: any) => f.type === "preview");
+    const variants = syncVariants.map((v) => {
+      const previewFile = v.files?.find((f) => f.type === "preview");
+
+      const baseCode = v.name.split("/")[0].trim(); // e.g. "02P"
+      const fullStripeName = `${baseCode} - ${v.name}`; // "02P - 02P / S"
+
       return {
         printful_store_variant_id: v.id,
-        variant_name: v.name,
+        variant_name: v.name,                   // "02P / S"
+        stripe_product_name: fullStripeName,    // "02P - 02P / S"
         size: v.size,
         color: v.color,
         available: v.available !== false,

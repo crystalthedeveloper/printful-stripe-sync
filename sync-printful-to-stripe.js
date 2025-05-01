@@ -25,37 +25,63 @@ async function sync() {
       headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
     });
     const detailData = await detailRes.json();
+
     const productName = detailData.result?.sync_product?.name;
     const syncVariants = detailData.result?.sync_variants;
+
     if (!productName || !Array.isArray(syncVariants)) continue;
 
     for (const variant of syncVariants) {
       const {
+        id: printful_variant_id,
         name: variantName,
         retail_price,
         is_deleted,
         is_ignored,
+        color,
+        size,
+        files,
       } = variant;
 
       if (is_deleted || is_ignored) continue;
 
+      const imageFile = files?.find(f => f.type === "preview");
+      const image_url = imageFile?.preview_url || "";
+
       try {
         const stripeProduct = await stripe.products.create({
           name: `${productName} - ${variantName}`,
+          metadata: {
+            printful_product_name: productName,
+            printful_variant_name: variantName,
+            printful_variant_id: String(printful_variant_id),
+            color: color || "",
+            size: size || "",
+            image_url,
+            mode: MODE,
+          },
         });
+
         const stripePrice = await stripe.prices.create({
           product: stripeProduct.id,
           unit_amount: Math.round(parseFloat(retail_price) * 100),
           currency: "cad",
+          metadata: {
+            size: size || "",
+            color: color || "",
+            image_url,
+            printful_variant_id: String(printful_variant_id),
+          },
         });
-        console.log(`✅ Created Stripe price for ${variantName}: ${stripePrice.id}`);
+
+        console.log(`✅ Synced ${variantName} → Stripe price ID: ${stripePrice.id}`);
       } catch (err) {
-        console.error(`❌ Stripe error for ${variantName}: ${err.message}`);
+        console.error(`❌ Stripe error for ${variantName}:`, err.message);
       }
     }
   }
 
-  console.log(`🎉 Sync Complete`);
+  console.log("🎉 Sync complete");
 }
 
 sync();
