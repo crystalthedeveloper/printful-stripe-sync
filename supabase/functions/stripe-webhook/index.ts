@@ -29,7 +29,12 @@ type StripeShipping = {
 };
 
 type StripeCustomerDetails = { email?: string };
-type StripeSession = { id: string; shipping_details?: StripeShipping; customer_details?: StripeCustomerDetails };
+type StripeSession = {
+  id: string;
+  livemode: boolean;
+  shipping_details?: StripeShipping;
+  customer_details?: StripeCustomerDetails;
+};
 type StripeEvent = { type: "checkout.session.completed"; data: { object: StripeSession } };
 type StripeLineItem = { quantity: number; price: { id: string } };
 type StripeLineItemResponse = { data: StripeLineItem[] };
@@ -51,10 +56,8 @@ async function getPrintfulImageURL(variantId: number): Promise<string | null> {
   return file?.url ?? null;
 }
 
-async function getMappedVariantId(stripePriceId: string): Promise<number | null> {
-  const mode = stripePriceId.startsWith("price_1") ? "live" : "test";
+async function getMappedVariantId(stripePriceId: string, mode: "test" | "live"): Promise<number | null> {
   console.log(`🔁 Getting mapped Printful variant for Stripe price ID: ${stripePriceId} (mode: ${mode})`);
-
   const res = await fetch(
     `${SUPABASE_URL}/rest/v1/variant_mappings?stripe_price_id=eq.${stripePriceId}&mode=eq.${mode}`,
     {
@@ -105,10 +108,14 @@ serve(async (req: Request): Promise<Response> => {
 
   if (event.type === "checkout.session.completed") {
     const session = event.data.object;
+    const mode: "test" | "live" = session.livemode ? "live" : "test";
+
     console.log("✅ Checkout session completed:", session.id);
+    console.log("🌐 Stripe session livemode:", session.livemode);
+    console.log("🔄 Using Supabase variant mapping mode:", mode);
 
     const itemsRes = await fetch(`https://api.stripe.com/v1/checkout/sessions/${session.id}/line_items`, {
-      headers: { Authorization: `Bearer ${STRIPE_SECRET_TEST}` },
+      headers: { Authorization: `Bearer ${STRIPE_SECRET_TEST}` }, // Using TEST key to retrieve session data
     });
 
     const itemsData: StripeLineItemResponse = await itemsRes.json();
@@ -123,7 +130,7 @@ serve(async (req: Request): Promise<Response> => {
       itemsData.data.map(async (item) => {
         const stripePriceId = item.price?.id;
         console.log("🛠 Processing item with price ID:", stripePriceId);
-        const variantId = await getMappedVariantId(stripePriceId);
+        const variantId = await getMappedVariantId(stripePriceId, mode);
         if (!variantId) return null;
 
         const fileUrl = await getPrintfulImageURL(variantId);

@@ -6,15 +6,16 @@ import Stripe from "stripe";
 import fetch from "node-fetch";
 dotenv.config();
 
-const STRIPE_SECRET_TEST = process.env.STRIPE_SECRET_TEST;
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const PRINTFUL_API_KEY = process.env.PRINTFUL_API_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const DRY_RUN = process.env.DRY_RUN === "true";
 const MODE = "test";
 
-const stripe = new Stripe(STRIPE_SECRET_TEST, { apiVersion: "2023-10-16" });
+const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
 
+// ✅ Get preview image from sync product
 async function getPrintfulImageURLFromProduct(productId, variantId) {
   try {
     const res = await fetch(`https://api.printful.com/sync/products/${productId}`, {
@@ -31,14 +32,17 @@ async function getPrintfulImageURLFromProduct(productId, variantId) {
   }
 }
 
-async function isValidPrintfulVariant(variantId) {
+// ✅ Validate variant using sync product API
+async function isValidPrintfulVariant(variantId, productId) {
   try {
-    const res = await fetch(`https://api.printful.com/store/variants/${variantId}`, {
+    const res = await fetch(`https://api.printful.com/sync/products/${productId}`, {
       headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
     });
-    if (!res.ok || res.status === 404) return false;
+    if (!res.ok) return false;
     const data = await res.json();
-    return !!data.result?.id;
+    const variant = data.result?.sync_variants?.find(v => v.id === variantId);
+    const preview = variant?.files?.find(f => f.type === "preview");
+    return !!(variant?.id && preview?.preview_url);
   } catch {
     return false;
   }
@@ -83,9 +87,9 @@ async function sync() {
         continue;
       }
 
-      const valid = await isValidPrintfulVariant(printful_variant_id);
+      const valid = await isValidPrintfulVariant(printful_variant_id, product.id);
       if (!valid) {
-        console.log(`🚫 Skipped ${printful_variant_id} - 404 or invalid`);
+        console.log(`🚫 Skipped ${printful_variant_id} - 404 or missing preview image`);
         continue;
       }
 

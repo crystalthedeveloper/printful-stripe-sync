@@ -45,7 +45,7 @@ serve(async (req: Request): Promise<Response> => {
       mode,
       success_url,
       cancel_url,
-      shipping_countries
+      shipping_countries,
     });
 
     if (!Array.isArray(line_items) || line_items.length === 0) {
@@ -110,6 +110,9 @@ serve(async (req: Request): Promise<Response> => {
     if (email) {
       formData.append("customer_email", email);
     }
+
+    // ✅ Add environment to metadata for webhook to read
+    formData.append("metadata[mode]", environment);
 
     console.log("📤 Sending formData to Stripe:", formData.toString());
 
