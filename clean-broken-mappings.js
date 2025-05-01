@@ -1,6 +1,6 @@
 // clean-broken-mappings.js
-// Removes only broken Printful variant mappings from Supabase (404 or missing mockup image)
-// clean-broken-mappings.js (Updated)
+// Removes broken or outdated Printful variant mappings from Supabase
+
 import dotenv from "dotenv";
 import fetch from "node-fetch";
 dotenv.config();
@@ -9,17 +9,18 @@ const PRINTFUL_API_KEY = process.env.PRINTFUL_API_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const DRY_RUN = process.env.DRY_RUN === "true";
+const MODE = process.env.MODE || "test";
 const delayMs = 200;
 
+// 🔍 Find product + variant based on variantId
 async function getProductVariantInfo(variantId) {
   try {
     const res = await fetch(`https://api.printful.com/sync/products`, {
       headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
     });
-
     if (!res.ok) return null;
-    const data = await res.json();
 
+    const data = await res.json();
     for (const product of data.result) {
       const detailRes = await fetch(`https://api.printful.com/sync/products/${product.id}`, {
         headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
@@ -32,7 +33,7 @@ async function getProductVariantInfo(variantId) {
 
       if (variant) return { productId: product.id, variant };
 
-      // 🔄 Try matching based on name/size/color if ID changed
+      // If no match, fallback to partial match by name
       for (const v of detailData.result?.sync_variants || []) {
         if (v.name.includes(variantId)) return { productId: product.id, variant: v };
       }
@@ -40,15 +41,15 @@ async function getProductVariantInfo(variantId) {
 
     return null;
   } catch (err) {
-    console.warn(`⚠️ Failed to fetch variant info for ${variantId}: ${err.message}`);
+    console.warn(`⚠️ Failed to find variant ${variantId}: ${err.message}`);
     return null;
   }
 }
 
 async function cleanBrokenMappings() {
-  console.log("🧹 Validating Supabase variant mappings...");
+  console.log(`🧹 Validating Supabase mappings in ${MODE.toUpperCase()} mode...`);
 
-  const fetchRes = await fetch(`${SUPABASE_URL}/rest/v1/variant_mappings?select=id,printful_variant_id`, {
+  const fetchRes = await fetch(`${SUPABASE_URL}/rest/v1/variant_mappings?select=id,printful_variant_id&mode=eq.${MODE}`, {
     headers: {
       apikey: SUPABASE_SERVICE_ROLE_KEY,
       Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`
@@ -57,7 +58,7 @@ async function cleanBrokenMappings() {
 
   if (!fetchRes.ok) {
     const error = await fetchRes.text();
-    console.error("❌ Failed to fetch mappings from Supabase:", error);
+    console.error("❌ Failed to fetch mappings:", error);
     return;
   }
 
@@ -69,7 +70,7 @@ async function cleanBrokenMappings() {
   for (const row of mappings) {
     const variantId = row.printful_variant_id;
     if (seen.has(variantId)) {
-      console.warn(`⚠️ Duplicate variant ID detected: ${variantId}`);
+      console.warn(`⚠️ Duplicate found: ${variantId}`);
       toDelete.push(row.id);
       continue;
     }
@@ -77,21 +78,23 @@ async function cleanBrokenMappings() {
     seen.add(variantId);
 
     const info = await getProductVariantInfo(variantId);
-    if (!info || !info.variant?.files?.find(f => f.type === "preview")) {
-      console.warn(`🗑️ Invalid or no image for variant ${variantId}`);
+    const previewOk = info?.variant?.files?.some(f => f.type === "preview");
+
+    if (!info || !previewOk) {
+      console.warn(`🗑️ Missing or invalid variant: ${variantId}`);
       toDelete.push(row.id);
     } else if (String(info.variant.id) !== String(variantId)) {
-      console.log(`✏️ Updating variant ${variantId} → ${info.variant.id}`);
+      console.log(`✏️ Needs update: ${variantId} → ${info.variant.id}`);
       toUpdate.push({ id: row.id, newVariantId: info.variant.id });
     }
 
-    await new Promise(res => setTimeout(res, delayMs));
+    await new Promise(res => setTimeout(res, delayMs)); // prevent rate limit
   }
 
-  // 🧹 Handle Updates
+  // ✅ Update IDs
   for (const u of toUpdate) {
     if (DRY_RUN) {
-      console.log(`DRY RUN: Would update ${u.id} to new ID ${u.newVariantId}`);
+      console.log(`DRY RUN: Would update row ${u.id} to ${u.newVariantId}`);
     } else {
       const updateRes = await fetch(`${SUPABASE_URL}/rest/v1/variant_mappings?id=eq.${u.id}`, {
         method: "PATCH",
@@ -104,17 +107,17 @@ async function cleanBrokenMappings() {
       });
 
       if (!updateRes.ok) {
-        console.error(`❌ Failed to update ID ${u.id}:`, await updateRes.text());
+        console.error(`❌ Update failed for ${u.id}:`, await updateRes.text());
       } else {
-        console.log(`✅ Updated Supabase row ${u.id} → ${u.newVariantId}`);
+        console.log(`✅ Updated row ${u.id} → ${u.newVariantId}`);
       }
     }
   }
 
-  // 🗑️ Handle Deletions
+  // 🗑️ Delete broken
   for (const id of toDelete) {
     if (DRY_RUN) {
-      console.log(`DRY RUN: Would delete ${id}`);
+      console.log(`DRY RUN: Would delete row ${id}`);
     } else {
       const deleteRes = await fetch(`${SUPABASE_URL}/rest/v1/variant_mappings?id=eq.${id}`, {
         method: "DELETE",
@@ -125,14 +128,14 @@ async function cleanBrokenMappings() {
       });
 
       if (!deleteRes.ok) {
-        console.error(`❌ Failed to delete row ${id}:`, await deleteRes.text());
+        console.error(`❌ Deletion failed for ${id}:`, await deleteRes.text());
       } else {
-        console.log(`🗑️ Deleted Supabase row ${id}`);
+        console.log(`🗑️ Deleted row ${id}`);
       }
     }
   }
 
-  console.log("✅ Cleanup completed.");
+  console.log("✅ Cleanup complete.");
 }
 
 cleanBrokenMappings();

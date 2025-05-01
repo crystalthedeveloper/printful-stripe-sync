@@ -1,17 +1,17 @@
 // sync-printful-to-stripe.js
-// Syncs Printful variants to Stripe and Supabase with update logic and duplicate cleanup
+// Unified script for syncing Printful variants to Stripe & Supabase (test or live mode)
 
 import dotenv from "dotenv";
 import Stripe from "stripe";
 import fetch from "node-fetch";
 dotenv.config();
 
+const MODE = process.env.MODE || "test"; // Set to "live" or "test"
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const PRINTFUL_API_KEY = process.env.PRINTFUL_API_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const DRY_RUN = process.env.DRY_RUN === "true";
-const MODE = "live";
 
 const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
 
@@ -43,7 +43,7 @@ async function getExistingMappings(variantId) {
 }
 
 async function sync() {
-  console.log("🔄 Starting Printful to Stripe & Supabase sync (LIVE mode)...");
+  console.log(`🔄 Syncing Printful variants to Stripe & Supabase in ${MODE.toUpperCase()} mode...`);
 
   const productRes = await fetch("https://api.printful.com/sync/products", {
     headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
@@ -127,9 +127,8 @@ async function sync() {
   }
 
   if (DRY_RUN) {
-    console.log("🧪 DRY RUN — Insert:");
+    console.log("🧪 DRY RUN MODE ENABLED — Previewing changes:");
     console.table(insertMappings.map(v => ({ variant: v.variant_name, stripe_price_id: v.stripe_price_id })));
-    console.log("🧪 DRY RUN — Update:");
     console.table(updateMappings.map(v => ({ id: v.id, variant: v.variant_name })));
     return;
   }
@@ -163,7 +162,7 @@ async function sync() {
     }
   }
 
-  console.log(`🎉 Sync complete — Inserted: ${insertMappings.length}, Updated: ${updateMappings.length}`);
+  console.log(`🎉 Sync Complete: Inserted ${insertMappings.length}, Updated ${updateMappings.length}`);
 }
 
 sync();
