@@ -43,31 +43,31 @@ async function deleteArchivedProducts(mode) {
 
   for (const product of archived) {
     try {
-        const prices = await stripe.prices.list({ product: product.id, limit: 100 });
+      const prices = await stripe.prices.list({ product: product.id, limit: 100 });
 
-        for (const price of prices.data) {
-          if (!DRY_RUN && FORCE_DELETE_PRICES) {
-            try {
-              await stripe.prices.del(price.id);
-              console.log(`🗑️ Force-deleted price: ${price.id}`);
-            } catch (err) {
-              console.warn(`⚠️ Could not delete price ${price.id}: ${err.message}`);
-            }
-          } else if (price.active && !DRY_RUN) {
-            await stripe.prices.update(price.id, { active: false });
-            console.log(`⛔ Deactivated price: ${price.id}`);
-          } else {
-            console.log(`🧪 Would delete/deactivate price: ${price.id}`);
+      for (const price of prices.data) {
+        if (!DRY_RUN && FORCE_DELETE_PRICES) {
+          try {
+            await stripe.prices.del(price.id);
+            console.log(`🗑️ Force-deleted price: ${price.id}`);
+          } catch (err) {
+            console.warn(`⚠️ Could not delete price ${price.id}: ${err.message}`);
           }
-        }        
+        } else if (price.active && !DRY_RUN) {
+          await stripe.prices.update(price.id, { active: false });
+          console.log(`⛔ Deactivated price: ${price.id}`);
+        } else {
+          console.log(`🧪 Would delete/deactivate price: ${price.id}`);
+        }
+      }
 
-      // Wait briefly for propagation
-      await new Promise(res => setTimeout(res, 1000));
+      // 🔄 Give Stripe time to update status
+      await new Promise(res => setTimeout(res, 1500));
 
-      const remainingPrices = await stripe.prices.list({ product: product.id, limit: 100 });
-      const anyRemaining = remainingPrices.data.some(p => !p.deleted && p.active);
+      const remaining = await stripe.prices.list({ product: product.id, limit: 100 });
+      const stillLinked = remaining.data.some(p => !p.deleted && p.active);
 
-      if (anyRemaining) {
+      if (stillLinked) {
         console.warn(`🚫 Skipping product ${product.id}: Still has active or undeleted prices.`);
         continue;
       }
@@ -79,7 +79,7 @@ async function deleteArchivedProducts(mode) {
         console.log(`🧪 Would delete product: ${product.id}`);
       }
     } catch (err) {
-      console.error(`❌ Failed to delete ${product.id}:`, err.message);
+      console.error(`❌ Failed to delete ${product.id}: ${err.message}`);
     }
   }
 
