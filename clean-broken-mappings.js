@@ -1,30 +1,18 @@
-// clean-printful-variants.js
-// Deactivates prices and deletes products for variants missing preview images (TEST + LIVE)
+// clean-duplicate-stripe-products.js
+// Archives Stripe products with duplicate names (TEST + LIVE)
 
 import dotenv from "dotenv";
 import Stripe from "stripe";
-import fetch from "node-fetch";
 dotenv.config();
 
 const DRY_RUN = process.env.DRY_RUN === "true";
-const delayMs = 200;
-
-const PRINTFUL_API_KEY = process.env.PRINTFUL_API_KEY;
 const STRIPE_KEYS = {
   test: process.env.STRIPE_SECRET_TEST,
   live: process.env.STRIPE_SECRET_KEY,
 };
 
-if (!PRINTFUL_API_KEY || !STRIPE_KEYS.test || !STRIPE_KEYS.live) {
-  throw new Error("❌ Missing PRINTFUL_API_KEY or Stripe secrets.");
-}
-
-async function getPrintfulProducts() {
-  const res = await fetch("https://api.printful.com/sync/products", {
-    headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
-  });
-  const data = await res.json();
-  return data.result;
+if (!STRIPE_KEYS.test || !STRIPE_KEYS.live) {
+  throw new Error("❌ Missing Stripe secret keys.");
 }
 
 async function getAllStripeProducts(stripe) {
@@ -44,66 +32,47 @@ async function getAllStripeProducts(stripe) {
   return products;
 }
 
-async function scanAndClean(mode) {
+async function removeDuplicates(mode) {
   const stripe = new Stripe(STRIPE_KEYS[mode], { apiVersion: "2023-10-16" });
-  console.log(`🔍 Scanning for broken variants in ${mode.toUpperCase()} mode...`);
+  console.log(`🧹 Cleaning duplicates in ${mode.toUpperCase()} mode...`);
 
-  const brokenVariants = [];
-  const printfulProducts = await getPrintfulProducts();
-  const stripeProducts = await getAllStripeProducts(stripe);
+  const products = await getAllStripeProducts(stripe);
+  const seen = new Map(); // name -> [products[]]
 
-  for (const product of printfulProducts) {
-    const detailRes = await fetch(`https://api.printful.com/sync/products/${product.id}`, {
-      headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
-    });
+  for (const product of products) {
+    if (!seen.has(product.name)) {
+      seen.set(product.name, []);
+    }
+    seen.get(product.name).push(product);
+  }
 
-    const detailData = await detailRes.json();
-    const variants = detailData.result?.sync_variants || [];
+  for (const [name, entries] of seen.entries()) {
+    if (entries.length > 1) {
+      // Sort by created date, keep the latest
+      entries.sort((a, b) => b.created - a.created);
+      const [keep, ...duplicates] = entries;
 
-    for (const variant of variants) {
-      const variantId = String(variant.id);
-      const variantName = variant.name;
-      const hasPreview = variant?.files?.some(f => f.type === "preview");
-
-      if (!hasPreview) {
-        brokenVariants.push({ variant_id: variantId, name: variantName });
-
-        console.warn(`⚠️ Missing preview for: ${variantName} (${variantId})`);
-
-        for (const product of stripeProducts) {
-          if (
-            product.metadata?.printful_variant_id === variantId ||
-            product.name.includes(variantName)
-          ) {
-            if (!DRY_RUN) {
-              try {
-                await stripe.products.update(product.id, { active: false });
-                console.log(`🗑️ Deactivated product: ${product.id} (${variantName})`);
-              } catch (err) {
-                console.error(`❌ Failed to deactivate product ${product.id}:`, err.message);
-              }
-            } else {
-              console.log(`🧪 Would deactivate product: ${product.id} (${variantName})`);
-            }
+      for (const dup of duplicates) {
+        if (!DRY_RUN) {
+          try {
+            await stripe.products.update(dup.id, { active: false });
+            console.log(`🗑️ Archived duplicate product: ${dup.id} (${name})`);
+          } catch (err) {
+            console.error(`❌ Failed to archive product ${dup.id}:`, err.message);
           }
+        } else {
+          console.log(`🧪 Would archive duplicate: ${dup.id} (${name})`);
         }
       }
     }
-
-    await new Promise((res) => setTimeout(res, delayMs));
   }
 
-  if (brokenVariants.length === 0) {
-    console.log(`✅ All variants have preview images in ${mode.toUpperCase()} mode.`);
-  } else {
-    console.log(`⚠️ Found ${brokenVariants.length} broken variants in ${mode.toUpperCase()}:`);
-    console.table(brokenVariants);
-  }
+  console.log(`✅ Done cleaning ${mode.toUpperCase()} duplicates.`);
 }
 
 async function run() {
-  await scanAndClean("test");
-  await scanAndClean("live");
+  await removeDuplicates("test");
+  await removeDuplicates("live");
 }
 
 run();
