@@ -1,4 +1,5 @@
 // sync-printful-to-stripe.js
+
 import dotenv from "dotenv";
 import Stripe from "stripe";
 import fetch from "node-fetch";
@@ -51,7 +52,10 @@ async function sync(mode) {
       const files = v.files;
       const image = files?.find(f => f.type === "preview")?.preview_url || "";
 
-      if (!productName || !variantName || !price) { skipped++; continue; }
+      if (!productName || !variantName || !price) {
+        skipped++;
+        continue;
+      }
 
       const cleanProductName = productName.replace(/^\[SKIPPED\]\s*/, "");
       const title = `${cleanProductName} - ${variantName}`;
@@ -77,10 +81,7 @@ async function sync(mode) {
 
         const needsUpdate = Object.entries(metadata).some(([k, v]) => product.metadata[k] !== v);
         if (needsUpdate && !DRY_RUN) {
-          await stripe.products.update(productId, {
-            metadata,
-            name: title,
-          });
+          await stripe.products.update(productId, { metadata, name: title });
           updated++;
         } else {
           skipped++;

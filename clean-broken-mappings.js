@@ -6,6 +6,7 @@ import Stripe from "stripe";
 dotenv.config();
 
 const DRY_RUN = process.env.DRY_RUN === "true";
+
 const STRIPE_KEYS = {
   test: process.env.STRIPE_SECRET_TEST,
   live: process.env.STRIPE_SECRET_KEY,
@@ -63,6 +64,7 @@ async function reactivateArchivedProducts(mode) {
 
         reactivatedProducts++;
       }
+
     } catch (err) {
       errors++;
       console.error(`❌ Error on ${product.id}: ${err.message}`);
