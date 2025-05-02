@@ -26,34 +26,44 @@ async function sync(mode) {
   const { result: variantList = [] } = await res.json();
 
   for (const variant of variantList) {
+    const variantId = variant?.id;
+    if (!variantId) {
+      console.warn("⚠️ Skipping variant with missing ID.");
+      continue;
+    }
+  
     try {
-      const variantId = variant.id;
       const variantDetailsRes = await fetch(`https://api.printful.com/store/variants/${variantId}`, {
         headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
       });
+  
       const variantData = await variantDetailsRes.json();
       const v = variantData.result;
-
-      const productName = v?.product?.name;
-      const variantName = v?.name;
-      const retail_price = v?.retail_price;
-      const printful_variant_id = v?.id;
-      const color = v?.color;
-      const size = v?.size;
-      const files = v?.files;
-
-      // Fallback if product name is missing
-      let resolvedProductName = productName;
-      if (!resolvedProductName && v?.product_id) {
+  
+      if (!v) {
+        console.warn(`⚠️ Skipping variant ${variantId}: No result returned from Printful API.`);
+        continue;
+      }
+  
+      let productName = v.product?.name;
+      const variantName = v.name;
+      const retail_price = v.retail_price;
+      const printful_variant_id = v.id;
+      const color = v.color;
+      const size = v.size;
+      const files = v.files;
+  
+      // Fallback to fetch product name if not present
+      if (!productName && v.product_id) {
         const productRes = await fetch(`https://api.printful.com/store/products/${v.product_id}`, {
           headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
         });
         const productJson = await productRes.json();
-        resolvedProductName = productJson.result?.name;
+        productName = productJson.result?.name;
       }
-
-      if (!resolvedProductName || !variantName || !retail_price) {
-        console.warn(`⚠️ Skipping variant ${printful_variant_id} due to missing data.`);
+  
+      if (!productName || !variantName || !retail_price) {
+        console.warn(`⚠️ Skipping variant ${printful_variant_id} due to missing name, product, or price`);
         continue;
       }
 
