@@ -36,19 +36,27 @@ async function sync(mode) {
 
       const variantData = await variantDetailsRes.json();
       const v = variantData.result;
+      const variantName = v?.name;
+      const retail_price = v?.retail_price;
+      const printful_variant_id = v?.id;
+      const color = v?.color;
+      const size = v?.size;
+      const files = v?.files;
+      let productName = v?.product?.name;
 
-      if (!v?.name || !v?.product?.name || !v?.retail_price) {
-        console.warn(`⚠️ Skipping variant ${variantId} due to missing name, product, or price`);
-        continue;
+      // Fallback to fetching product if missing
+      if (!productName && v?.product_id) {
+        const productRes = await fetch(`https://api.printful.com/store/products/${v.product_id}`, {
+          headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
+        });
+        const productJson = await productRes.json();
+        productName = productJson.result?.name;
       }
 
-      const productName = v.product.name;
-      const variantName = v.name;
-      const retail_price = v.retail_price;
-      const printful_variant_id = v.id;
-      const color = v.color;
-      const size = v.size;
-      const files = v.files;
+      if (!productName || !variantName || !retail_price) {
+        console.warn(`⚠️ Skipping variant ${printful_variant_id} due to missing name, product, or price`);
+        continue;
+      }
 
       const imageFile = files?.find(f => f.type === "preview");
       const image_url = imageFile?.preview_url || "";
