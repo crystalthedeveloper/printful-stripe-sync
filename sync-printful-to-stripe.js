@@ -6,6 +6,7 @@ import fetch from "node-fetch";
 dotenv.config();
 
 const MODE = process.env.MODE || "test"; // "live" or "test"
+const DRY_RUN = process.env.DRY_RUN === "true";
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const PRINTFUL_API_KEY = process.env.PRINTFUL_API_KEY;
 
@@ -13,6 +14,7 @@ const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
 
 async function sync() {
   console.log(`🔄 Syncing Printful variants to Stripe in ${MODE.toUpperCase()} mode...`);
+  if (DRY_RUN) console.log("🚧 DRY_RUN is enabled. No changes will be made to Stripe.");
 
   const productRes = await fetch("https://api.printful.com/sync/products", {
     headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
@@ -49,8 +51,7 @@ async function sync() {
       const image_url = imageFile?.preview_url || "";
 
       try {
-        // Create product in Stripe
-        const stripeProduct = await stripe.products.create({
+        const stripeProductPayload = {
           name: `${productName} - ${variantName}`,
           metadata: {
             printful_product_name: productName,
@@ -61,22 +62,32 @@ async function sync() {
             image_url,
             mode: MODE,
           },
-        });
+        };
 
-        // Create price in Stripe with required metadata
-        const stripePrice = await stripe.prices.create({
-          product: stripeProduct.id,
+        const stripePricePayload = {
           unit_amount: Math.round(parseFloat(retail_price) * 100),
           currency: "cad",
           metadata: {
             size: size || "",
             color: color || "",
             image_url,
-            printful_store_variant_id: String(printful_variant_id), // ✅ Required for webhook
+            printful_store_variant_id: String(printful_variant_id), // ✅ Needed for webhook
           },
-        });
+        };
 
-        console.log(`✅ Synced: ${variantName} → Stripe price ID: ${stripePrice.id}`);
+        if (DRY_RUN) {
+          console.log(`🧪 Would sync: ${variantName}`);
+          console.log("🔍 Product metadata:", stripeProductPayload.metadata);
+          console.log("🔍 Price metadata:", stripePricePayload.metadata);
+        } else {
+          const stripeProduct = await stripe.products.create(stripeProductPayload);
+          const stripePrice = await stripe.prices.create({
+            ...stripePricePayload,
+            product: stripeProduct.id,
+          });
+
+          console.log(`✅ Synced: ${variantName} → Stripe price ID: ${stripePrice.id}`);
+        }
       } catch (err) {
         console.error(`❌ Failed for variant "${variantName}":`, err.message);
       }

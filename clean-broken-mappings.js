@@ -2,57 +2,81 @@
 // Preview Printful variants and check which are valid (no Supabase)
 
 import dotenv from "dotenv";
-import fetch from "node-fetch";
+import Stripe from "stripe";
 dotenv.config();
 
-const PRINTFUL_API_KEY = process.env.PRINTFUL_API_KEY;
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const DRY_RUN = process.env.DRY_RUN === "true";
-const delayMs = 200;
 
-async function getPrintfulVariants() {
-  const productRes = await fetch("https://api.printful.com/sync/products", {
-    headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
-  });
+const REQUIRED_PRODUCT_METADATA = [
+  "printful_product_name",
+  "printful_variant_name",
+  "printful_variant_id",
+  "color",
+  "size",
+  "image_url",
+  "mode"
+];
 
-  const productList = (await productRes.json()).result;
-  const invalidVariants = [];
+const REQUIRED_PRICE_METADATA = ["printful_store_variant_id"];
 
-  for (const product of productList) {
-    const detailRes = await fetch(`https://api.printful.com/sync/products/${product.id}`, {
-      headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
-    });
+const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
 
-    const detailData = await detailRes.json();
-    const syncVariants = detailData.result?.sync_variants;
+async function getInvalidProducts() {
+  const invalid = [];
 
-    for (const variant of syncVariants) {
-      const hasPreview = variant?.files?.some(f => f.type === "preview");
+  const products = await stripe.products.list({ limit: 100 });
+  for (const product of products.data) {
+    const priceList = await stripe.prices.list({ product: product.id, limit: 100 });
 
-      if (!hasPreview) {
-        invalidVariants.push({
-          variant_id: variant.id,
-          name: variant.name,
-          product_id: product.id,
-        });
+    const missingProductMetadata = REQUIRED_PRODUCT_METADATA.filter(key => !product.metadata?.[key]);
+    const invalidPrices = priceList.data.filter(
+      price => REQUIRED_PRICE_METADATA.some(key => !price.metadata?.[key])
+    );
+
+    if (missingProductMetadata.length > 0 || invalidPrices.length > 0) {
+      invalid.push({
+        product_id: product.id,
+        product_name: product.name,
+        missingProductMetadata,
+        invalidPriceIds: invalidPrices.map(p => p.id),
+      });
+
+      if (!DRY_RUN) {
+        // Optionally delete the product and its prices
+        try {
+          for (const price of invalidPrices) {
+            await stripe.prices.update(price.id, { active: false });
+            console.log(`🧹 Deactivated price: ${price.id}`);
+          }
+
+          await stripe.products.update(product.id, { active: false });
+          console.log(`🧹 Deactivated product: ${product.id}`);
+        } catch (err) {
+          console.error(`❌ Failed to clean up ${product.id}:`, err.message);
+        }
+      } else {
+        console.log(`📝 Would clean: ${product.id} (${product.name})`);
       }
     }
-
-    await new Promise(res => setTimeout(res, delayMs));
   }
 
-  return invalidVariants;
+  return invalid;
 }
 
-async function run() {
-  console.log("🔍 Checking Printful variants...");
+(async function run() {
+  console.log("🔍 Scanning Stripe products for missing metadata...");
 
-  const broken = await getPrintfulVariants();
+  const broken = await getInvalidProducts();
   if (!broken.length) {
-    console.log("✅ All variants have preview images.");
+    console.log("✅ All products and prices have required metadata.");
   } else {
-    console.log(`⚠️ ${broken.length} variant(s) missing preview images:`);
-    console.table(broken);
+    console.log(`⚠️ ${broken.length} product(s) have metadata issues:`);
+    console.table(broken.map(b => ({
+      product_id: b.product_id,
+      name: b.product_name,
+      missing_fields: b.missingProductMetadata.join(", "),
+      invalid_prices: b.invalidPriceIds.join(", ")
+    })));
   }
-}
-
-run();
+})();
