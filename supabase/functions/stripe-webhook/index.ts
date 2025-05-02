@@ -6,6 +6,7 @@ import { serve } from "https://deno.land/std@0.192.0/http/server.ts";
 const STRIPE_SECRET_TEST = Deno.env.get("STRIPE_SECRET_TEST");
 const STRIPE_SECRET_LIVE = Deno.env.get("STRIPE_SECRET_KEY");
 const STRIPE_WEBHOOK_SECRET_TEST = Deno.env.get("STRIPE_WEBHOOK_SECRET_TEST");
+const STRIPE_WEBHOOK_SECRET_LIVE = Deno.env.get("STRIPE_WEBHOOK_SECRET_LIVE");
 const PRINTFUL_API_KEY = Deno.env.get("PRINTFUL_API_KEY");
 
 const corsHeaders = {
@@ -49,12 +50,16 @@ serve(async (req: Request): Promise<Response> => {
   const sig = req.headers.get("Stripe-Signature");
   const bodyBuffer = await req.arrayBuffer();
 
-  if (!STRIPE_WEBHOOK_SECRET_TEST || !PRINTFUL_API_KEY) {
+  const mode = sig?.includes("livemode") ? "live" : "test";
+  const stripeSecret = mode === "live" ? STRIPE_SECRET_LIVE : STRIPE_SECRET_TEST;
+  const stripeWebhookSecret = mode === "live" ? STRIPE_WEBHOOK_SECRET_LIVE : STRIPE_WEBHOOK_SECRET_TEST;
+
+  if (!stripeSecret || !stripeWebhookSecret || !PRINTFUL_API_KEY) {
     console.error("❌ Missing required environment variables.");
     return new Response("Server misconfiguration", { status: 500, headers: corsHeaders });
   }
 
-  const isValid = await verifyStripeSignature(bodyBuffer, sig, STRIPE_WEBHOOK_SECRET_TEST);
+  const isValid = await verifyStripeSignature(bodyBuffer, sig, stripeWebhookSecret);
   if (!isValid) {
     console.error("❌ Invalid Stripe signature");
     return new Response("Invalid Stripe signature", { status: 401, headers: corsHeaders });
@@ -70,13 +75,6 @@ serve(async (req: Request): Promise<Response> => {
 
   if (event.type === "checkout.session.completed") {
     const session = event.data.object;
-    const mode: "test" | "live" = session.livemode ? "live" : "test";
-    const stripeSecret = mode === "live" ? STRIPE_SECRET_LIVE : STRIPE_SECRET_TEST;
-
-    if (!stripeSecret) {
-      console.error(`❌ Stripe secret not set for mode: ${mode}`);
-      return new Response("Stripe secret missing", { status: 500, headers: corsHeaders });
-    }
 
     console.log("📦 Webhook triggered for mode:", mode);
 
@@ -90,21 +88,32 @@ serve(async (req: Request): Promise<Response> => {
       return new Response("Failed to fetch line items", { status: 500, headers: corsHeaders });
     }
 
-    const items = itemsData.data.map((item) => {
-      const variant_id = item.price?.metadata?.printful_store_variant_id;
-      if (!variant_id) {
-        console.warn("⚠️ Missing printful_store_variant_id in Stripe price metadata for:", item.price.id);
-        return null;
-      }
+    const items = await Promise.all(
+      itemsData.data.map(async (item) => {
+        const variant_id = item.price?.metadata?.printful_store_variant_id;
+        if (!variant_id) {
+          console.warn(`⚠️ Missing printful_store_variant_id for Stripe price ${item.price.id}`);
+          return null;
+        }
 
-      return {
-        variant_id: Number(variant_id),
-        quantity: item.quantity,
-      };
-    });
+        // Validate variant exists in Printful
+        const pfCheck = await fetch(`https://api.printful.com/store/variants/${variant_id}`, {
+          headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
+        });
+        if (!pfCheck.ok) {
+          console.warn(`⚠️ Variant ID ${variant_id} not found in Printful`);
+          return null;
+        }
 
-    const filteredItems = items.filter(Boolean);
-    if (!filteredItems.length) {
+        return {
+          variant_id: Number(variant_id),
+          quantity: item.quantity,
+        };
+      })
+    );
+
+    const validItems = items.filter(Boolean);
+    if (!validItems.length) {
       console.warn("⚠️ No valid items to send to Printful.");
       return new Response("No valid items to order", { status: 200, headers: corsHeaders });
     }
@@ -121,7 +130,7 @@ serve(async (req: Request): Promise<Response> => {
         zip: shipping?.address?.postal_code || "",
         email: session.customer_details?.email || "test@example.com",
       },
-      items: filteredItems,
+      items: validItems,
       confirm: false,
     };
 
