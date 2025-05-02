@@ -1,5 +1,4 @@
-// clean-broken-mappings.js
-// Deletes all ARCHIVED (inactive) Stripe products in LIVE mode for cleanup
+// Deletes all archived Stripe products in LIVE mode by first deactivating prices
 
 import dotenv from "dotenv";
 import Stripe from "stripe";
@@ -24,17 +23,32 @@ async function deleteArchivedProducts() {
   while (hasMore) {
     const res = await stripe.products.list({
       limit: 100,
-      active: false, // only archived
+      active: false, // Only archived
       starting_after,
     });
 
     for (const product of res.data) {
       try {
+        // Step 1: Deactivate all prices
+        const prices = await stripe.prices.list({ product: product.id, limit: 100 });
+
+        for (const price of prices.data) {
+          if (price.active) {
+            if (DRY_RUN) {
+              console.log(`🧪 Would deactivate price: ${price.id}`);
+            } else {
+              await stripe.prices.update(price.id, { active: false });
+              console.log(`⛔ Deactivated price: ${price.id}`);
+            }
+          }
+        }
+
+        // Step 2: Delete product
         if (DRY_RUN) {
           console.log(`🧪 Would delete: ${product.id} (${product.name})`);
         } else {
           await stripe.products.del(product.id);
-          console.log(`🗑️ Deleted archived product: ${product.id} (${product.name})`);
+          console.log(`🗑️ Deleted product: ${product.id} (${product.name})`);
           deletedCount++;
         }
       } catch (err) {
