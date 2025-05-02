@@ -1,5 +1,5 @@
 // clean-printful-variants.js
-// Preview Printful variants and check which are valid (no Supabase)
+// Scan Printful variants for missing preview images and optionally clean from Stripe
 
 import dotenv from "dotenv";
 import Stripe from "stripe";
@@ -35,17 +35,33 @@ async function getPrintfulVariants() {
 
     for (const variant of syncVariants) {
       const hasPreview = variant?.files?.some(f => f.type === "preview");
+      const variantId = String(variant.id);
+      const variantName = variant.name;
 
       if (!hasPreview) {
         invalidVariants.push({
-          variant_id: variant.id,
-          name: variant.name,
+          variant_id: variantId,
+          name: variantName,
           product_id: product.id,
         });
 
+        console.warn(`⚠️ Missing preview for variant: ${variantName} (ID: ${variantId})`);
+
         if (!DRY_RUN) {
-          console.log(`🧼 Deleting Stripe product/price for invalid variant: ${variant.name}`);
-          // Optionally delete price/product using Stripe API here if needed
+          try {
+            // Find and delete Stripe price with metadata.match
+            const prices = await stripe.prices.list({ limit: 100 });
+            const matching = prices.data.find(p =>
+              p.metadata?.printful_store_variant_id === variantId
+            );
+
+            if (matching) {
+              await stripe.prices.update(matching.id, { active: false });
+              console.log(`🗑️  Deactivated Stripe price: ${matching.id}`);
+            }
+          } catch (err) {
+            console.error(`❌ Failed to deactivate Stripe price for variant "${variantName}":`, err.message);
+          }
         }
       }
     }
@@ -60,10 +76,11 @@ async function run() {
   console.log("🔍 Scanning Printful variants for missing preview images...");
 
   const broken = await getPrintfulVariants();
+
   if (!broken.length) {
-    console.log("✅ All variants are valid.");
+    console.log("✅ All variants have preview images.");
   } else {
-    console.log(`⚠️ ${broken.length} variant(s) missing preview images:`);
+    console.log(`⚠️ Found ${broken.length} variant(s) missing preview images:`);
     console.table(broken);
   }
 }

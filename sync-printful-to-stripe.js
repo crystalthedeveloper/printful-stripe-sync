@@ -10,6 +10,10 @@ const DRY_RUN = process.env.DRY_RUN === "true";
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const PRINTFUL_API_KEY = process.env.PRINTFUL_API_KEY;
 
+if (!STRIPE_SECRET_KEY || !PRINTFUL_API_KEY) {
+  throw new Error("❌ Missing STRIPE_SECRET_KEY or PRINTFUL_API_KEY in environment.");
+}
+
 const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
 
 async function sync() {
@@ -45,7 +49,12 @@ async function sync() {
         files,
       } = variant;
 
+      // Skip broken or non-sellable variants
       if (is_deleted || is_ignored) continue;
+      if (!retail_price || !printful_variant_id) {
+        console.warn(`⚠️ Skipping variant "${variantName}" due to missing retail_price or variant ID`);
+        continue;
+      }
 
       const imageFile = files?.find(f => f.type === "preview");
       const image_url = imageFile?.preview_url || "";
