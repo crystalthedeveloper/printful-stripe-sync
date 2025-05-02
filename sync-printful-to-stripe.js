@@ -23,6 +23,7 @@ async function sync(mode) {
   const res = await fetch("https://api.printful.com/store/variants", {
     headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
   });
+
   const { result: variantList = [] } = await res.json();
 
   let added = 0, updated = 0, skipped = 0;
@@ -60,8 +61,12 @@ async function sync(mode) {
         continue;
       }
 
+      // Remove any previous [SKIPPED] tags from the name
+      const cleanProductName = productName.replace(/^\[SKIPPED\]\s*/, "");
+      const title = `${cleanProductName} - ${variantName}`;
+
       const metadata = {
-        printful_product_name: productName,
+        printful_product_name: cleanProductName,
         printful_variant_name: variantName,
         printful_variant_id: String(variantId),
         color: v.color || "",
@@ -70,8 +75,10 @@ async function sync(mode) {
         mode,
       };
 
-      const title = `${productName} - ${variantName}`;
-      const existing = await stripe.products.search({ query: `name:"${title}"` });
+      // Check if this variant_id already exists in metadata
+      const existing = await stripe.products.search({
+        query: `metadata['printful_variant_id']:'${variantId}'`,
+      });
 
       let productId;
       if (existing.data.length > 0) {
@@ -80,12 +87,20 @@ async function sync(mode) {
 
         const needsUpdate = Object.entries(metadata).some(([k, v]) => product.metadata[k] !== v);
         if (needsUpdate && !DRY_RUN) {
-          await stripe.products.update(productId, { metadata });
+          await stripe.products.update(productId, {
+            metadata,
+            name: title, // also update name if it had [SKIPPED] before
+          });
           updated++;
+        } else {
+          skipped++;
         }
       } else {
         if (!DRY_RUN) {
-          const created = await stripe.products.create({ name: title, metadata });
+          const created = await stripe.products.create({
+            name: title,
+            metadata,
+          });
           productId = created.id;
           added++;
         } else {
@@ -113,6 +128,7 @@ async function sync(mode) {
       }
     } catch (err) {
       skipped++;
+      console.error(`❌ Failed to sync variant ${variant?.id}: ${err.message}`);
     }
   }
 

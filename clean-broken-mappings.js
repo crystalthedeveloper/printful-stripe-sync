@@ -1,5 +1,5 @@
 // clean-broken-mappings.js
-// Deactivates prices and marks archived products as skipped in TEST and LIVE environments
+// Reactivates archived products and prevents duplicate/dirty names (TEST + LIVE)
 
 import dotenv from "dotenv";
 import Stripe from "stripe";
@@ -35,7 +35,7 @@ async function getAllStripeProducts(stripe, { active } = {}) {
 
 async function reactivateArchivedProducts(mode) {
   const stripe = new Stripe(STRIPE_KEYS[mode], { apiVersion: "2023-10-16" });
-  console.log(`🧹 Checking archived products in ${mode.toUpperCase()}...`);
+  console.log(`🧹 Reactivating archived products in ${mode.toUpperCase()}...`);
 
   const archived = await getAllStripeProducts(stripe, { active: false });
 
@@ -55,22 +55,24 @@ async function reactivateArchivedProducts(mode) {
       }
 
       if (!DRY_RUN) {
+        // Restore name by removing [SKIPPED] if present
+        const cleanName = product.name.replace(/^\[SKIPPED\]\s*/, "");
+
         await stripe.products.update(product.id, {
+          name: cleanName,
           active: true,
-          metadata: {
-            ...product.metadata,
-            reactivated_from_archived: "true",
-          },
         });
+
         reactivatedProducts++;
       }
 
     } catch (err) {
       errors++;
+      console.error(`❌ Error on ${product.id}: ${err.message}`);
     }
   }
 
-  console.log(`✅ ${mode.toUpperCase()} REVIEW → Reactivated: ${reactivatedProducts}, Deactivated prices: ${deactivatedPrices}, Errors: ${errors}`);
+  console.log(`✅ ${mode.toUpperCase()} CLEANUP → Reactivated: ${reactivatedProducts}, Deactivated prices: ${deactivatedPrices}, Errors: ${errors}`);
 }
 
 async function run() {
