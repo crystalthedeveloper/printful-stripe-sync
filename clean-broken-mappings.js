@@ -7,6 +7,8 @@ import Stripe from "stripe";
 dotenv.config();
 
 const DRY_RUN = process.env.DRY_RUN === "true";
+const FORCE_DELETE_PRICES = process.env.FORCE_DELETE_PRICES === "true";
+
 const STRIPE_KEYS = {
   test: process.env.STRIPE_SECRET_TEST,
   live: process.env.STRIPE_SECRET_KEY,
@@ -84,6 +86,7 @@ async function deleteArchivedProducts(mode) {
   for (const product of archived) {
     try {
       const prices = await stripe.prices.list({ product: product.id, limit: 100 });
+
       for (const price of prices.data) {
         if (price.active && !DRY_RUN) {
           await stripe.prices.update(price.id, { active: false });
@@ -91,11 +94,31 @@ async function deleteArchivedProducts(mode) {
         } else if (price.active) {
           console.log(`🧪 Would deactivate price: ${price.id}`);
         }
+
+        // Force delete price if enabled
+        if (FORCE_DELETE_PRICES && !DRY_RUN) {
+          try {
+            await stripe.prices.del(price.id);
+            console.log(`🗑️ Force deleted price: ${price.id}`);
+          } catch (err) {
+            console.warn(`⚠️ Failed to delete price ${price.id}: ${err.message}`);
+          }
+        } else if (FORCE_DELETE_PRICES) {
+          console.log(`🧪 Would force delete price: ${price.id}`);
+        }
+      }
+
+      const remainingPrices = await stripe.prices.list({ product: product.id, limit: 100 });
+      const stillActive = remainingPrices.data.some(p => p.active);
+
+      if (stillActive) {
+        console.warn(`🚫 Cannot delete ${product.id}: still has active prices.`);
+        continue;
       }
 
       if (!DRY_RUN) {
         await stripe.products.del(product.id);
-        console.log(`🗑️ Deleted archived product: ${product.id} (${product.name})`);
+        console.log(`🗑️ Deleted product: ${product.id} (${product.name})`);
       } else {
         console.log(`🧪 Would delete: ${product.id} (${product.name})`);
       }
