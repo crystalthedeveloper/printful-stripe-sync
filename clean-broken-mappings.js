@@ -46,22 +46,23 @@ async function deleteArchivedProducts(mode) {
       const prices = await stripe.prices.list({ product: product.id, limit: 100 });
 
       for (const price of prices.data) {
-        if (!DRY_RUN && FORCE_DELETE_PRICES) {
+        if (FORCE_DELETE_PRICES && !DRY_RUN) {
           await stripe.prices.del(price.id);
           console.log(`🗑️ Force-deleted price: ${price.id}`);
         } else if (price.active && !DRY_RUN) {
           await stripe.prices.update(price.id, { active: false });
           console.log(`⛔ Deactivated price: ${price.id}`);
         } else {
-          console.log(`🧪 Would delete or deactivate price: ${price.id}`);
+          console.log(`🧪 Would delete/deactivate price: ${price.id}`);
         }
       }
 
+      // Re-check if prices still exist
       const remainingPrices = await stripe.prices.list({ product: product.id, limit: 100 });
-      const stillExists = remainingPrices.data.length > 0;
+      const anyRemaining = remainingPrices.data.some(p => !p.deleted);
 
-      if (stillExists && !FORCE_DELETE_PRICES) {
-        console.warn(`🚫 Skipping product ${product.id}: Still has undeletable prices.`);
+      if (anyRemaining) {
+        console.warn(`🚫 Skipping product ${product.id}: Still has active or undeleted prices.`);
         continue;
       }
 
@@ -75,4 +76,13 @@ async function deleteArchivedProducts(mode) {
       console.error(`❌ Failed to delete ${product.id}:`, err.message);
     }
   }
+
+  console.log(`✅ Done cleaning deleted products in ${mode.toUpperCase()}`);
 }
+
+async function run() {
+  await deleteArchivedProducts("test");
+  await deleteArchivedProducts("live");
+}
+
+run();
