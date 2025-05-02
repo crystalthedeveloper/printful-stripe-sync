@@ -31,15 +31,13 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node sync-printful-to-stripe.js
 
-      - name: Run clean broken mappings
+      - name: Run clean broken mappings (delete archived in LIVE)
         env:
           DRY_RUN: false
-          PRINTFUL_API_KEY: ${{ secrets.PRINTFUL_API_KEY }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
-          STRIPE_SECRET_TEST: ${{ secrets.STRIPE_SECRET_TEST }}
         run: node clean-broken-mappings.js
 
-      - name: Remove duplicate products
+      - name: Remove duplicate products (delete TEST + LIVE)
         env:
           DRY_RUN: false
           STRIPE_SECRET_TEST: ${{ secrets.STRIPE_SECRET_TEST }}

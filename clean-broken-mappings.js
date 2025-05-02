@@ -1,23 +1,21 @@
-// delete-archived-stripe-products.js
-// Deletes all archived (inactive) Stripe products from TEST and LIVE environments
+// clean-broken-mappings.js
+// Deletes all ARCHIVED (inactive) Stripe products in LIVE mode for cleanup
 
 import dotenv from "dotenv";
 import Stripe from "stripe";
 dotenv.config();
 
 const DRY_RUN = process.env.DRY_RUN === "true";
-const STRIPE_KEYS = {
-  test: process.env.STRIPE_SECRET_TEST,
-  live: process.env.STRIPE_SECRET_KEY,
-};
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 
-if (!STRIPE_KEYS.test || !STRIPE_KEYS.live) {
-  throw new Error("❌ Missing Stripe secret keys.");
+if (!STRIPE_SECRET_KEY) {
+  throw new Error("❌ Missing STRIPE_SECRET_KEY in environment.");
 }
 
-async function deleteArchivedProducts(mode) {
-  const stripe = new Stripe(STRIPE_KEYS[mode], { apiVersion: "2023-10-16" });
-  console.log(`🧹 Deleting ARCHIVED products in ${mode.toUpperCase()} mode...`);
+const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
+
+async function deleteArchivedProducts() {
+  console.log("🧹 Deleting ARCHIVED products in LIVE mode...");
 
   let deletedCount = 0;
   let hasMore = true;
@@ -26,8 +24,8 @@ async function deleteArchivedProducts(mode) {
   while (hasMore) {
     const res = await stripe.products.list({
       limit: 100,
+      active: false, // only archived
       starting_after,
-      active: false,
     });
 
     for (const product of res.data) {
@@ -50,12 +48,7 @@ async function deleteArchivedProducts(mode) {
     }
   }
 
-  console.log(`✅ Finished deleting ${deletedCount} archived products in ${mode.toUpperCase()} mode.`);
+  console.log(`✅ Deleted ${deletedCount} archived products in LIVE mode.`);
 }
 
-async function run() {
-  await deleteArchivedProducts("test");
-  await deleteArchivedProducts("live");
-}
-
-run();
+deleteArchivedProducts();
