@@ -25,7 +25,11 @@ serve(async (req) => {
     return new Response("Invalid JSON", { status: 400 });
   }
 
-  if (event?.type === "checkout.session.completed") {
+  if (
+    event?.type === "checkout.session.completed" &&
+    event?.data?.object?.metadata?.source === "template"
+  ) {
+    
     const session = event.data.object;
 
     const productName = session?.metadata?.name ?? "Unknown";

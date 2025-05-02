@@ -49,6 +49,7 @@ serve(async (req)=>{
     metadata: {
       productId,
       name,
+      source: "template",
       mode
     },
     success_url: `https://www.crystalthedeveloper.ca/store/success`,

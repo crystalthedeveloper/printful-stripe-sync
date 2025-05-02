@@ -5,7 +5,7 @@ import Stripe from "stripe";
 import fetch from "node-fetch";
 dotenv.config();
 
-const MODE = process.env.MODE || "test"; // "live" or "test"
+const MODE = process.env.MODE || "test";
 const DRY_RUN = process.env.DRY_RUN === "true";
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const PRINTFUL_API_KEY = process.env.PRINTFUL_API_KEY;
@@ -49,56 +49,89 @@ async function sync() {
         files,
       } = variant;
 
-      // Skip broken or non-sellable variants
-      if (is_deleted || is_ignored) continue;
-      if (!retail_price || !printful_variant_id) {
-        console.warn(`⚠️ Skipping variant "${variantName}" due to missing retail_price or variant ID`);
+      if (is_deleted || is_ignored || !retail_price || !printful_variant_id) {
+        console.warn(`⚠️ Skipping variant "${variantName}" due to missing data`);
         continue;
       }
 
       const imageFile = files?.find(f => f.type === "preview");
       const image_url = imageFile?.preview_url || "";
 
+      const expectedMetadata = {
+        printful_product_name: productName,
+        printful_variant_name: variantName,
+        printful_variant_id: String(printful_variant_id),
+        color: color || "",
+        size: size || "",
+        image_url,
+        mode: MODE,
+      };
+
       try {
-        const stripeProductPayload = {
-          name: `${productName} - ${variantName}`,
-          metadata: {
-            printful_product_name: productName,
-            printful_variant_name: variantName,
-            printful_variant_id: String(printful_variant_id),
-            color: color || "",
-            size: size || "",
-            image_url,
-            mode: MODE,
-          },
-        };
+        // Try to find existing Stripe product by name
+        const existingProducts = await stripe.products.search({
+          query: `name:"${productName} - ${variantName}"`,
+        });
 
-        const stripePricePayload = {
-          unit_amount: Math.round(parseFloat(retail_price) * 100),
-          currency: "cad",
-          metadata: {
-            size: size || "",
-            color: color || "",
-            image_url,
-            printful_store_variant_id: String(printful_variant_id), // ✅ Needed for webhook
-          },
-        };
+        if (existingProducts.data.length > 0) {
+          const existingProduct = existingProducts.data[0];
 
-        if (DRY_RUN) {
-          console.log(`🧪 Would sync: ${variantName}`);
-          console.log("🔍 Product metadata:", stripeProductPayload.metadata);
-          console.log("🔍 Price metadata:", stripePricePayload.metadata);
+          // Update product metadata if missing
+          const missingMetadata = Object.entries(expectedMetadata).some(
+            ([key, val]) => existingProduct.metadata[key] !== val
+          );
+
+          if (missingMetadata && !DRY_RUN) {
+            await stripe.products.update(existingProduct.id, { metadata: expectedMetadata });
+            console.log(`🔄 Updated product metadata for: ${variantName}`);
+          }
+
+          // Find price and check metadata
+          const prices = await stripe.prices.list({ product: existingProduct.id, limit: 10 });
+          const existingPrice = prices.data.find(p => !p.deleted);
+
+          const hasCorrectMeta = existingPrice?.metadata?.printful_store_variant_id === String(printful_variant_id);
+
+          if (!hasCorrectMeta && !DRY_RUN) {
+            await stripe.prices.update(existingPrice.id, {
+              metadata: {
+                ...existingPrice.metadata,
+                printful_store_variant_id: String(printful_variant_id),
+              },
+            });
+            console.log(`🔄 Updated price metadata for: ${variantName}`);
+          }
+
+          if (DRY_RUN) {
+            console.log(`🧪 Would update metadata for: ${variantName}`);
+          }
         } else {
-          const stripeProduct = await stripe.products.create(stripeProductPayload);
-          const stripePrice = await stripe.prices.create({
-            ...stripePricePayload,
-            product: stripeProduct.id,
-          });
+          // Create new product + price
+          if (!DRY_RUN) {
+            const stripeProduct = await stripe.products.create({
+              name: `${productName} - ${variantName}`,
+              metadata: expectedMetadata,
+            });
 
-          console.log(`✅ Synced: ${variantName} → Stripe price ID: ${stripePrice.id}`);
+            const stripePrice = await stripe.prices.create({
+              product: stripeProduct.id,
+              unit_amount: Math.round(parseFloat(retail_price) * 100),
+              currency: "cad",
+              metadata: {
+                size: size || "",
+                color: color || "",
+                image_url,
+                printful_store_variant_id: String(printful_variant_id),
+              },
+            });
+
+            console.log(`✅ Synced new: ${variantName} → ${stripePrice.id}`);
+          } else {
+            console.log(`🧪 Would create product + price for: ${variantName}`);
+          }
         }
       } catch (err) {
-        console.error(`❌ Failed for variant "${variantName}":`, err.message);
+        console.error(`❌ Error syncing ${variantName}:`, err.message);
       }
     }
   }
