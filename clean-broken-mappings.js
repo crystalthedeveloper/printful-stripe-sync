@@ -1,60 +1,114 @@
+// clean-printful-variants.js
+//with product search, preview validation, price deactivation, and metadata update related Stripe prices (test & live)
+
 import dotenv from "dotenv";
 import Stripe from "stripe";
+import fetch from "node-fetch";
 dotenv.config();
 
 const DRY_RUN = process.env.DRY_RUN === "true";
-const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+const delayMs = 200;
 
-if (!STRIPE_SECRET_KEY) {
-  throw new Error("❌ Missing STRIPE_SECRET_KEY in environment.");
+const PRINTFUL_API_KEY = process.env.PRINTFUL_API_KEY;
+const STRIPE_KEYS = {
+  test: process.env.STRIPE_SECRET_TEST,
+  live: process.env.STRIPE_SECRET_KEY,
+};
+
+if (!PRINTFUL_API_KEY || !STRIPE_KEYS.test || !STRIPE_KEYS.live) {
+  throw new Error("❌ Missing PRINTFUL_API_KEY or Stripe secrets.");
 }
 
-const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
+async function getPrintfulProducts() {
+  const res = await fetch("https://api.printful.com/sync/products", {
+    headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
+  });
+  const data = await res.json();
+  return data.result;
+}
 
-async function deleteAllProducts() {
-  console.log("🧨 Deleting ALL Stripe products in LIVE mode...");
-
-  let deletedCount = 0;
-  let hasMore = true;
-  let starting_after;
-
-  while (hasMore) {
-    const res = await stripe.products.list({
-      limit: 100,
-      starting_after,
+async function findStripeProductByName(stripe, name) {
+  try {
+    const result = await stripe.products.search({
+      query: `name:"${name}"`,
     });
+    return result.data[0] || null;
+  } catch (err) {
+    console.error(`❌ Failed to search for product "${name}":`, err.message);
+    return null;
+  }
+}
 
-    for (const product of res.data) {
-      try {
-        // Step 1: Deactivate and remove prices
-        const prices = await stripe.prices.list({ product: product.id, limit: 100 });
+async function scanAndClean(mode) {
+  const stripe = new Stripe(STRIPE_KEYS[mode], { apiVersion: "2023-10-16" });
+  console.log(`🔍 Cleaning broken mappings in ${mode.toUpperCase()}...`);
+
+  const brokenVariants = [];
+  const productList = await getPrintfulProducts();
+
+  for (const product of productList) {
+    const detailRes = await fetch(`https://api.printful.com/sync/products/${product.id}`, {
+      headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
+    });
+    const detailData = await detailRes.json();
+    const productName = detailData.result?.sync_product?.name;
+    const variants = detailData.result?.sync_variants || [];
+
+    for (const variant of variants) {
+      const variantId = String(variant.id);
+      const variantName = variant.name;
+      const fullName = `${productName} - ${variantName}`;
+      const hasPreview = variant?.files?.some(f => f.type === "preview");
+      const imageFile = variant?.files?.find(f => f.type === "preview");
+      const image_url = imageFile?.preview_url || "";
+
+      const expectedMetadata = {
+        printful_product_name: productName,
+        printful_variant_name: variantName,
+        printful_variant_id: variantId,
+        color: variant.color || "",
+        size: variant.size || "",
+        image_url,
+        mode,
+      };
+
+      const existingProduct = await findStripeProductByName(stripe, fullName);
+      if (!existingProduct) continue;
+
+      if (!hasPreview) {
+        brokenVariants.push({ variant_id: variantId, name: fullName, product_id: product.id });
+        const prices = await stripe.prices.list({ product: existingProduct.id, limit: 100 });
         for (const price of prices.data) {
           if (price.active && !DRY_RUN) {
             await stripe.prices.update(price.id, { active: false });
-            console.log(`⛔ Deactivated price: ${price.id}`);
+            console.log(`⛔ Deactivated price: ${price.id} (${fullName})`);
           }
         }
-
-        // Step 2: Delete product
-        if (!DRY_RUN) {
-          await stripe.products.del(product.id);
-          console.log(`🗑️ Deleted product: ${product.id} (${product.name})`);
-          deletedCount++;
-        } else {
-          console.log(`🧪 Would delete product: ${product.id} (${product.name})`);
+      } else {
+        const needsUpdate = Object.entries(expectedMetadata).some(
+          ([k, v]) => existingProduct.metadata[k] !== v
+        );
+        if (needsUpdate && !DRY_RUN) {
+          await stripe.products.update(existingProduct.id, { metadata: expectedMetadata });
+          console.log(`🔁 Fixed metadata for: ${fullName}`);
         }
-      } catch (err) {
-        console.error(`❌ Failed to delete product ${product.id}:`, err.message);
       }
     }
 
-    hasMore = res.has_more;
-    if (res.data.length > 0) {
-      starting_after = res.data[res.data.length - 1].id;
-    }
+    await new Promise((res) => setTimeout(res, delayMs));
   }
 
-  console.log(`✅ Deleted ${deletedCount} products from Stripe.`);
+  if (brokenVariants.length === 0) {
+    console.log(`✅ No broken variants found in ${mode.toUpperCase()}.`);
+  } else {
+    console.log(`⚠️ Found ${brokenVariants.length} broken variants in ${mode.toUpperCase()}:`);
+    console.table(brokenVariants);
+  }
 }
 
-deleteAllProducts();
+async function run() {
+  await scanAndClean("test");
+  await scanAndClean("live");
+}
+
+run();
