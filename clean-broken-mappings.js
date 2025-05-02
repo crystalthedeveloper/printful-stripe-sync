@@ -1,5 +1,5 @@
 // clean-printful-variants.js
-// Scans Printful variants for missing preview images and deactivates related Stripe prices (test & live)
+// Deactivates prices and deletes products for variants missing preview images (TEST + LIVE)
 
 import dotenv from "dotenv";
 import Stripe from "stripe";
@@ -27,24 +27,21 @@ async function getPrintfulProducts() {
   return data.result;
 }
 
-async function getAllStripePrices(stripe) {
-  const prices = [];
+async function getAllStripeProducts(stripe) {
+  const products = [];
   let hasMore = true;
   let starting_after;
 
   while (hasMore) {
-    const res = await stripe.prices.list({
-      limit: 100,
-      starting_after,
-    });
-    prices.push(...res.data);
+    const res = await stripe.products.list({ limit: 100, starting_after });
+    products.push(...res.data);
     hasMore = res.has_more;
     if (res.data.length > 0) {
       starting_after = res.data[res.data.length - 1].id;
     }
   }
 
-  return prices;
+  return products;
 }
 
 async function scanAndClean(mode) {
@@ -52,37 +49,42 @@ async function scanAndClean(mode) {
   console.log(`🔍 Scanning for broken variants in ${mode.toUpperCase()} mode...`);
 
   const brokenVariants = [];
-  const productList = await getPrintfulProducts();
-  const stripePrices = await getAllStripePrices(stripe);
+  const printfulProducts = await getPrintfulProducts();
+  const stripeProducts = await getAllStripeProducts(stripe);
 
-  for (const product of productList) {
+  for (const product of printfulProducts) {
     const detailRes = await fetch(`https://api.printful.com/sync/products/${product.id}`, {
       headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
     });
+
     const detailData = await detailRes.json();
     const variants = detailData.result?.sync_variants || [];
 
     for (const variant of variants) {
-      const hasPreview = variant?.files?.some(f => f.type === "preview");
       const variantId = String(variant.id);
       const variantName = variant.name;
+      const hasPreview = variant?.files?.some(f => f.type === "preview");
 
       if (!hasPreview) {
-        brokenVariants.push({ variant_id: variantId, name: variantName, product_id: product.id });
+        brokenVariants.push({ variant_id: variantId, name: variantName });
+
         console.warn(`⚠️ Missing preview for: ${variantName} (${variantId})`);
 
-        if (!DRY_RUN) {
-          const matches = stripePrices.filter(
-            p => p.metadata?.printful_store_variant_id === variantId && p.active
-          );
-
-          for (const match of matches) {
-            await stripe.prices.update(match.id, { active: false });
-            console.log(`🗑️ Deactivated: ${match.id} (${variantName})`);
-          }
-
-          if (matches.length === 0) {
-            console.log(`ℹ️ No active prices to deactivate for: ${variantName}`);
+        for (const product of stripeProducts) {
+          if (
+            product.metadata?.printful_variant_id === variantId ||
+            product.name.includes(variantName)
+          ) {
+            if (!DRY_RUN) {
+              try {
+                await stripe.products.update(product.id, { active: false });
+                console.log(`🗑️ Deactivated product: ${product.id} (${variantName})`);
+              } catch (err) {
+                console.error(`❌ Failed to deactivate product ${product.id}:`, err.message);
+              }
+            } else {
+              console.log(`🧪 Would deactivate product: ${product.id} (${variantName})`);
+            }
           }
         }
       }
