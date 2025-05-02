@@ -43,16 +43,23 @@ async function deleteArchivedProducts(mode) {
 
   for (const product of archived) {
     try {
-      const prices = await stripe.prices.list({ product: product.id, limit: 100 });
+        const prices = await stripe.prices.list({ product: product.id, limit: 100 });
 
-      for (const price of prices.data) {
-        if (price.active && !DRY_RUN) {
-          await stripe.prices.update(price.id, { active: false });
-          console.log(`⛔ Deactivated price: ${price.id}`);
-        } else {
-          console.log(`🧪 Would deactivate price: ${price.id}`);
-        }
-      }
+        for (const price of prices.data) {
+          if (!DRY_RUN && FORCE_DELETE_PRICES) {
+            try {
+              await stripe.prices.del(price.id);
+              console.log(`🗑️ Force-deleted price: ${price.id}`);
+            } catch (err) {
+              console.warn(`⚠️ Could not delete price ${price.id}: ${err.message}`);
+            }
+          } else if (price.active && !DRY_RUN) {
+            await stripe.prices.update(price.id, { active: false });
+            console.log(`⛔ Deactivated price: ${price.id}`);
+          } else {
+            console.log(`🧪 Would delete/deactivate price: ${price.id}`);
+          }
+        }        
 
       // Wait briefly for propagation
       await new Promise(res => setTimeout(res, 1000));
