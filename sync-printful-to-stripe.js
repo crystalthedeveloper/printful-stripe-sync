@@ -5,32 +5,31 @@ import Stripe from "stripe";
 import fetch from "node-fetch";
 dotenv.config();
 
-const MODE = process.env.MODE || "test";
 const DRY_RUN = process.env.DRY_RUN === "true";
-const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const PRINTFUL_API_KEY = process.env.PRINTFUL_API_KEY;
+const STRIPE_KEYS = {
+  test: process.env.STRIPE_SECRET_TEST,
+  live: process.env.STRIPE_SECRET_KEY,
+};
 
-if (!STRIPE_SECRET_KEY || !PRINTFUL_API_KEY) {
-  throw new Error("❌ Missing STRIPE_SECRET_KEY or PRINTFUL_API_KEY in environment.");
+if (!PRINTFUL_API_KEY || !STRIPE_KEYS.test || !STRIPE_KEYS.live) {
+  throw new Error("❌ Missing API keys in environment.");
 }
 
-const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
-
-async function sync() {
-  console.log(`🔄 Syncing Printful variants to Stripe in ${MODE.toUpperCase()} mode...`);
+async function sync(mode) {
+  const stripe = new Stripe(STRIPE_KEYS[mode], { apiVersion: "2023-10-16" });
+  console.log(`🔄 Syncing Printful variants to Stripe in ${mode.toUpperCase()} mode...`);
   if (DRY_RUN) console.log("🚧 DRY_RUN is enabled. No changes will be made to Stripe.");
 
   const productRes = await fetch("https://api.printful.com/sync/products", {
     headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
   });
-
   const productList = (await productRes.json()).result;
 
   for (const product of productList) {
     const detailRes = await fetch(`https://api.printful.com/sync/products/${product.id}`, {
       headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
     });
-
     const detailData = await detailRes.json();
     const productName = detailData.result?.sync_product?.name;
     const syncVariants = detailData.result?.sync_variants;
@@ -64,57 +63,50 @@ async function sync() {
         color: color || "",
         size: size || "",
         image_url,
-        mode: MODE,
+        mode,
       };
 
       try {
-        // Try to find existing Stripe product by name
         const existingProducts = await stripe.products.search({
           query: `name:"${productName} - ${variantName}"`,
         });
 
         if (existingProducts.data.length > 0) {
           const existingProduct = existingProducts.data[0];
-
-          // Update product metadata if missing
-          const missingMetadata = Object.entries(expectedMetadata).some(
-            ([key, val]) => existingProduct.metadata[key] !== val
+          const needsMetaUpdate = Object.entries(expectedMetadata).some(
+            ([k, v]) => existingProduct.metadata[k] !== v
           );
 
-          if (missingMetadata && !DRY_RUN) {
+          if (needsMetaUpdate && !DRY_RUN) {
             await stripe.products.update(existingProduct.id, { metadata: expectedMetadata });
-            console.log(`🔄 Updated product metadata for: ${variantName}`);
+            console.log(`🔄 Updated product metadata: ${variantName} (${mode})`);
           }
 
-          // Find price and check metadata
           const prices = await stripe.prices.list({ product: existingProduct.id, limit: 10 });
-          const existingPrice = prices.data.find(p => !p.deleted);
+          const price = prices.data.find(p => !p.deleted);
 
-          const hasCorrectMeta = existingPrice?.metadata?.printful_store_variant_id === String(printful_variant_id);
+          const hasCorrectMeta = price?.metadata?.printful_store_variant_id === String(printful_variant_id);
 
-          if (!hasCorrectMeta && !DRY_RUN) {
-            await stripe.prices.update(existingPrice.id, {
+          if (!hasCorrectMeta && price && !DRY_RUN) {
+            await stripe.prices.update(price.id, {
               metadata: {
-                ...existingPrice.metadata,
+                ...price.metadata,
                 printful_store_variant_id: String(printful_variant_id),
               },
             });
-            console.log(`🔄 Updated price metadata for: ${variantName}`);
+            console.log(`🔄 Updated price metadata: ${variantName} (${mode})`);
           }
 
-          if (DRY_RUN) {
-            console.log(`🧪 Would update metadata for: ${variantName}`);
-          }
+          if (DRY_RUN) console.log(`🧪 Would update existing: ${variantName} (${mode})`);
         } else {
-          // Create new product + price
           if (!DRY_RUN) {
-            const stripeProduct = await stripe.products.create({
+            const newProduct = await stripe.products.create({
               name: `${productName} - ${variantName}`,
               metadata: expectedMetadata,
             });
 
-            const stripePrice = await stripe.prices.create({
-              product: stripeProduct.id,
+            const newPrice = await stripe.prices.create({
+              product: newProduct.id,
               unit_amount: Math.round(parseFloat(retail_price) * 100),
               currency: "cad",
               metadata: {
@@ -125,18 +117,23 @@ async function sync() {
               },
             });
 
-            console.log(`✅ Synced new: ${variantName} → ${stripePrice.id}`);
+            console.log(`✅ Created new: ${variantName} → ${newPrice.id} (${mode})`);
           } else {
-            console.log(`🧪 Would create product + price for: ${variantName}`);
+            console.log(`🧪 Would create new: ${variantName} (${mode})`);
           }
         }
       } catch (err) {
-        console.error(`❌ Error syncing ${variantName}:`, err.message);
+        console.error(`❌ Error syncing ${variantName} (${mode}):`, err.message);
       }
     }
   }
 
-  console.log("🎉 Sync complete");
+  console.log(`✅ Sync complete for ${mode.toUpperCase()}`);
 }
 
-sync();
+async function run() {
+  await sync("test");
+  await sync("live");
+}
+
+run();
