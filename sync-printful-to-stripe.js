@@ -24,8 +24,8 @@ async function sync() {
     const detailRes = await fetch(`https://api.printful.com/sync/products/${product.id}`, {
       headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
     });
-    const detailData = await detailRes.json();
 
+    const detailData = await detailRes.json();
     const productName = detailData.result?.sync_product?.name;
     const syncVariants = detailData.result?.sync_variants;
 
@@ -49,6 +49,7 @@ async function sync() {
       const image_url = imageFile?.preview_url || "";
 
       try {
+        // Create product in Stripe
         const stripeProduct = await stripe.products.create({
           name: `${productName} - ${variantName}`,
           metadata: {
@@ -62,6 +63,7 @@ async function sync() {
           },
         });
 
+        // Create price in Stripe with required metadata
         const stripePrice = await stripe.prices.create({
           product: stripeProduct.id,
           unit_amount: Math.round(parseFloat(retail_price) * 100),
@@ -70,13 +72,13 @@ async function sync() {
             size: size || "",
             color: color || "",
             image_url,
-            printful_store_variant_id: String(printful_variant_id), // ✅ THIS FIXED LINE
+            printful_store_variant_id: String(printful_variant_id), // ✅ Required for webhook
           },
         });
 
-        console.log(`✅ Synced ${variantName} → Stripe price ID: ${stripePrice.id}`);
+        console.log(`✅ Synced: ${variantName} → Stripe price ID: ${stripePrice.id}`);
       } catch (err) {
-        console.error(`❌ Stripe error for ${variantName}:`, err.message);
+        console.error(`❌ Failed for variant "${variantName}":`, err.message);
       }
     }
   }
