@@ -33,11 +33,15 @@ async function getAllStripeProducts(stripe, { active } = {}) {
   return products;
 }
 
-async function markArchivedProducts(mode) {
+async function reactivateArchivedProducts(mode) {
   const stripe = new Stripe(STRIPE_KEYS[mode], { apiVersion: "2023-10-16" });
-  console.log(`🧹 Cleaning archived products in ${mode.toUpperCase()}...`);
+  console.log(`🧹 Checking archived products in ${mode.toUpperCase()}...`);
 
   const archived = await getAllStripeProducts(stripe, { active: false });
+
+  let reactivatedProducts = 0;
+  let deactivatedPrices = 0;
+  let errors = 0;
 
   for (const product of archived) {
     try {
@@ -46,41 +50,32 @@ async function markArchivedProducts(mode) {
       for (const price of prices.data) {
         if (price.active && !DRY_RUN) {
           await stripe.prices.update(price.id, { active: false });
-          console.log(`⛔ Deactivated price: ${price.id}`);
-        } else {
-          console.log(`🧪 Would deactivate price: ${price.id}`);
+          deactivatedPrices++;
         }
       }
 
       if (!DRY_RUN) {
-        const updatedName = product.name.startsWith("[SKIPPED] ")
-          ? product.name
-          : `[SKIPPED] ${product.name}`;
-
         await stripe.products.update(product.id, {
-          name: updatedName,
+          active: true,
           metadata: {
             ...product.metadata,
-            deletion_skipped: "true",
+            reactivated_from_archived: "true",
           },
         });
-
-        console.log(`🔖 Marked product as skipped: ${product.id}`);
-      } else {
-        console.log(`🧪 Would mark product as skipped: ${product.id}`);
+        reactivatedProducts++;
       }
 
     } catch (err) {
-      console.error(`❌ Error processing product ${product.id}: ${err.message}`);
+      errors++;
     }
   }
 
-  console.log(`✅ Done cleaning archived products in ${mode.toUpperCase()}`);
+  console.log(`✅ ${mode.toUpperCase()} REVIEW → Reactivated: ${reactivatedProducts}, Deactivated prices: ${deactivatedPrices}, Errors: ${errors}`);
 }
 
 async function run() {
-  await markArchivedProducts("test");
-  await markArchivedProducts("live");
+  await reactivateArchivedProducts("test");
+  await reactivateArchivedProducts("live");
 }
 
 run();

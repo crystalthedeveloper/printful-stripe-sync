@@ -25,123 +25,98 @@ async function sync(mode) {
   });
   const { result: variantList = [] } = await res.json();
 
+  let added = 0, updated = 0, skipped = 0;
+
   for (const variant of variantList) {
     const variantId = variant?.id;
     if (!variantId) {
-      console.warn("⚠️ Skipping variant with missing ID.");
+      skipped++;
       continue;
     }
-  
+
     try {
-      const variantDetailsRes = await fetch(`https://api.printful.com/store/variants/${variantId}`, {
+      const detailsRes = await fetch(`https://api.printful.com/store/variants/${variantId}`, {
         headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
       });
-  
-      const variantData = await variantDetailsRes.json();
-      const v = variantData.result;
-  
-      if (!v) {
-        console.warn(`⚠️ Skipping variant ${variantId}: No result returned from Printful API.`);
-        continue;
-      }
-  
+      const { result: v } = await detailsRes.json();
+      if (!v) { skipped++; continue; }
+
       let productName = v.product?.name;
-      const variantName = v.name;
-      const retail_price = v.retail_price;
-      const printful_variant_id = v.id;
-      const color = v.color;
-      const size = v.size;
-      const files = v.files;
-  
-      // Fallback to fetch product name if not present
-      if (!productName && v.product_id) {
+      if (!productName && v?.product_id) {
         const productRes = await fetch(`https://api.printful.com/store/products/${v.product_id}`, {
           headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
         });
         const productJson = await productRes.json();
         productName = productJson.result?.name;
       }
-  
-      if (!productName || !variantName || !retail_price) {
-        console.warn(`⚠️ Skipping variant ${printful_variant_id} due to missing name, product, or price`);
+
+      const variantName = v.name;
+      const price = v.retail_price;
+      const files = v.files;
+      const image = files?.find(f => f.type === "preview")?.preview_url || "";
+
+      if (!productName || !variantName || !price) {
+        skipped++;
         continue;
       }
 
-      const imageFile = files?.find(f => f.type === "preview");
-      const image_url = imageFile?.preview_url || "";
-
-      const expectedMetadata = {
-        printful_product_name: resolvedProductName,
+      const metadata = {
+        printful_product_name: productName,
         printful_variant_name: variantName,
-        printful_variant_id: String(printful_variant_id),
-        color: color || "",
-        size: size || "",
-        image_url,
+        printful_variant_id: String(variantId),
+        color: v.color || "",
+        size: v.size || "",
+        image_url: image,
         mode,
       };
 
-      const productTitle = `${resolvedProductName} - ${variantName}`;
+      const title = `${productName} - ${variantName}`;
+      const existing = await stripe.products.search({ query: `name:"${title}"` });
 
-      const existingProducts = await stripe.products.search({
-        query: `name:"${productTitle}"`,
-      });
+      let productId;
+      if (existing.data.length > 0) {
+        const product = existing.data[0];
+        productId = product.id;
 
-      let stripeProductId;
-
-      if (existingProducts.data.length > 0) {
-        const existingProduct = existingProducts.data[0];
-        stripeProductId = existingProduct.id;
-
-        const needsMetaUpdate = Object.entries(expectedMetadata).some(
-          ([k, v]) => existingProduct.metadata[k] !== v
-        );
-
-        if (needsMetaUpdate && !DRY_RUN) {
-          await stripe.products.update(existingProduct.id, { metadata: expectedMetadata });
-          console.log(`🔄 Updated product metadata: ${variantName} (${mode})`);
+        const needsUpdate = Object.entries(metadata).some(([k, v]) => product.metadata[k] !== v);
+        if (needsUpdate && !DRY_RUN) {
+          await stripe.products.update(productId, { metadata });
+          updated++;
         }
       } else {
         if (!DRY_RUN) {
-          const newProduct = await stripe.products.create({
-            name: productTitle,
-            metadata: expectedMetadata,
-          });
-          stripeProductId = newProduct.id;
-          console.log(`✅ Created new product: ${productTitle} (${mode})`);
+          const created = await stripe.products.create({ name: title, metadata });
+          productId = created.id;
+          added++;
         } else {
-          console.log(`🧪 Would create product: ${productTitle} (${mode})`);
           continue;
         }
       }
 
-      const existingPrices = await stripe.prices.list({ product: stripeProductId, limit: 100 });
-      const hasMatchingPrice = existingPrices.data.some((p) =>
-        p.metadata?.printful_store_variant_id === String(printful_variant_id)
+      const prices = await stripe.prices.list({ product: productId, limit: 100 });
+      const hasPrice = prices.data.some(p =>
+        p.metadata?.printful_store_variant_id === String(variantId)
       );
 
-      if (!hasMatchingPrice && !DRY_RUN) {
+      if (!hasPrice && !DRY_RUN) {
         await stripe.prices.create({
-          product: stripeProductId,
-          unit_amount: Math.round(parseFloat(retail_price) * 100),
+          product: productId,
+          unit_amount: Math.round(parseFloat(price) * 100),
           currency: "cad",
           metadata: {
-            size: size || "",
-            color: color || "",
-            image_url,
-            printful_store_variant_id: String(printful_variant_id),
+            size: v.size || "",
+            color: v.color || "",
+            image_url: image,
+            printful_store_variant_id: String(variantId),
           },
         });
-        console.log(`✅ Added price for: ${variantName} (${mode})`);
-      } else if (!hasMatchingPrice) {
-        console.log(`🧪 Would create price for: ${variantName} (${mode})`);
       }
-
     } catch (err) {
-      console.error(`❌ Error syncing variant (${mode}): ${err.message}`);
+      skipped++;
     }
   }
 
-  console.log(`✅ Sync complete for ${mode.toUpperCase()}`);
+  console.log(`✅ ${mode.toUpperCase()} SYNC → Added: ${added}, Updated: ${updated}, Skipped: ${skipped}`);
 }
 
 async function run() {
