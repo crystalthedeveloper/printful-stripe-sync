@@ -1,13 +1,11 @@
-
 // clean-broken-mappings.js
-// Deletes duplicate Stripe products by name in both TEST and LIVE environments
+// Deactivates prices and marks archived products as skipped in TEST and LIVE environments
 
 import dotenv from "dotenv";
 import Stripe from "stripe";
 dotenv.config();
 
 const DRY_RUN = process.env.DRY_RUN === "true";
-const FORCE_DELETE_PRICES = process.env.FORCE_DELETE_PRICES === "true";
 
 const STRIPE_KEYS = {
   test: process.env.STRIPE_SECRET_TEST,
@@ -35,9 +33,9 @@ async function getAllStripeProducts(stripe, { active } = {}) {
   return products;
 }
 
-async function deleteArchivedProducts(mode) {
+async function markArchivedProducts(mode) {
   const stripe = new Stripe(STRIPE_KEYS[mode], { apiVersion: "2023-10-16" });
-  console.log(`🗑️ Deleting archived products in ${mode.toUpperCase()}...`);
+  console.log(`🧹 Cleaning archived products in ${mode.toUpperCase()}...`);
 
   const archived = await getAllStripeProducts(stripe, { active: false });
 
@@ -46,49 +44,43 @@ async function deleteArchivedProducts(mode) {
       const prices = await stripe.prices.list({ product: product.id, limit: 100 });
 
       for (const price of prices.data) {
-        if (!DRY_RUN && FORCE_DELETE_PRICES) {
-          try {
-            await stripe.prices.del(price.id);
-            console.log(`🗑️ Force-deleted price: ${price.id}`);
-          } catch (err) {
-            console.warn(`⚠️ Could not delete price ${price.id}: ${err.message}`);
-          }
-        } else if (price.active && !DRY_RUN) {
+        if (price.active && !DRY_RUN) {
           await stripe.prices.update(price.id, { active: false });
           console.log(`⛔ Deactivated price: ${price.id}`);
         } else {
-          console.log(`🧪 Would delete/deactivate price: ${price.id}`);
+          console.log(`🧪 Would deactivate price: ${price.id}`);
         }
       }
 
-      // 🔄 Give Stripe time to update status
-      await new Promise(res => setTimeout(res, 1500));
-
-      const remaining = await stripe.prices.list({ product: product.id, limit: 100 });
-      const stillLinked = remaining.data.some(p => !p.deleted && p.active);
-
-      if (stillLinked) {
-        console.warn(`🚫 Skipping product ${product.id}: Still has active or undeleted prices.`);
-        continue;
-      }
-
       if (!DRY_RUN) {
-        await stripe.products.del(product.id);
-        console.log(`🗑️ Deleted product: ${product.id}`);
+        const updatedName = product.name.startsWith("[SKIPPED] ")
+          ? product.name
+          : `[SKIPPED] ${product.name}`;
+
+        await stripe.products.update(product.id, {
+          name: updatedName,
+          metadata: {
+            ...product.metadata,
+            deletion_skipped: "true",
+          },
+        });
+
+        console.log(`🔖 Marked product as skipped: ${product.id}`);
       } else {
-        console.log(`🧪 Would delete product: ${product.id}`);
+        console.log(`🧪 Would mark product as skipped: ${product.id}`);
       }
+
     } catch (err) {
-      console.error(`❌ Failed to delete ${product.id}: ${err.message}`);
+      console.error(`❌ Error processing product ${product.id}: ${err.message}`);
     }
   }
 
-  console.log(`✅ Done cleaning deleted products in ${mode.toUpperCase()}`);
+  console.log(`✅ Done cleaning archived products in ${mode.toUpperCase()}`);
 }
 
 async function run() {
-  await deleteArchivedProducts("test");
-  await deleteArchivedProducts("live");
+  await markArchivedProducts("test");
+  await markArchivedProducts("live");
 }
 
 run();
