@@ -1,5 +1,5 @@
-// clean-duplicate-stripe-products.js
-// Deletes Stripe products with duplicate names (TEST + LIVE)
+// delete-archived-stripe-products.js
+// Deletes all archived (inactive) Stripe products from TEST and LIVE environments
 
 import dotenv from "dotenv";
 import Stripe from "stripe";
@@ -15,63 +15,47 @@ if (!STRIPE_KEYS.test || !STRIPE_KEYS.live) {
   throw new Error("❌ Missing Stripe secret keys.");
 }
 
-async function getAllStripeProducts(stripe) {
-  const products = [];
+async function deleteArchivedProducts(mode) {
+  const stripe = new Stripe(STRIPE_KEYS[mode], { apiVersion: "2023-10-16" });
+  console.log(`🧹 Deleting ARCHIVED products in ${mode.toUpperCase()} mode...`);
+
+  let deletedCount = 0;
   let hasMore = true;
   let starting_after;
 
   while (hasMore) {
-    const res = await stripe.products.list({ limit: 100, starting_after });
-    products.push(...res.data);
+    const res = await stripe.products.list({
+      limit: 100,
+      starting_after,
+      active: false,
+    });
+
+    for (const product of res.data) {
+      try {
+        if (DRY_RUN) {
+          console.log(`🧪 Would delete: ${product.id} (${product.name})`);
+        } else {
+          await stripe.products.del(product.id);
+          console.log(`🗑️ Deleted archived product: ${product.id} (${product.name})`);
+          deletedCount++;
+        }
+      } catch (err) {
+        console.error(`❌ Failed to delete product ${product.id}:`, err.message);
+      }
+    }
+
     hasMore = res.has_more;
     if (res.data.length > 0) {
       starting_after = res.data[res.data.length - 1].id;
     }
   }
 
-  return products;
-}
-
-async function removeDuplicates(mode) {
-  const stripe = new Stripe(STRIPE_KEYS[mode], { apiVersion: "2023-10-16" });
-  console.log(`🧹 Deleting duplicate Stripe products in ${mode.toUpperCase()} mode...`);
-
-  const products = await getAllStripeProducts(stripe);
-  const seen = new Map(); // name => [product, product, ...]
-
-  for (const product of products) {
-    if (!seen.has(product.name)) {
-      seen.set(product.name, []);
-    }
-    seen.get(product.name).push(product);
-  }
-
-  for (const [name, group] of seen.entries()) {
-    if (group.length > 1) {
-      group.sort((a, b) => b.created - a.created); // keep newest
-      const [keep, ...duplicates] = group;
-
-      for (const dup of duplicates) {
-        try {
-          if (DRY_RUN) {
-            console.log(`🧪 Would delete product: ${dup.id} (${name})`);
-          } else {
-            await stripe.products.del(dup.id);
-            console.log(`🗑️ Deleted duplicate product: ${dup.id} (${name})`);
-          }
-        } catch (err) {
-          console.error(`❌ Failed to delete product ${dup.id}:`, err.message);
-        }
-      }
-    }
-  }
-
-  console.log(`✅ Duplicate cleanup finished for ${mode.toUpperCase()}`);
+  console.log(`✅ Finished deleting ${deletedCount} archived products in ${mode.toUpperCase()} mode.`);
 }
 
 async function run() {
-  await removeDuplicates("test");
-  await removeDuplicates("live");
+  await deleteArchivedProducts("test");
+  await deleteArchivedProducts("live");
 }
 
 run();
