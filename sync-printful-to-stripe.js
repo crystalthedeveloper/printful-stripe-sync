@@ -18,22 +18,17 @@ if (!PRINTFUL_API_KEY || !STRIPE_KEYS.test || !STRIPE_KEYS.live) {
 async function sync(mode) {
   const stripe = new Stripe(STRIPE_KEYS[mode], { apiVersion: "2023-10-16" });
   console.log(`🔄 Syncing Printful variants to Stripe in ${mode.toUpperCase()} mode...`);
-  if (DRY_RUN) console.log("🚧 DRY_RUN is enabled. No changes will be made to Stripe.");
 
   const res = await fetch("https://api.printful.com/store/variants", {
     headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
   });
-
   const { result: variantList = [] } = await res.json();
 
   let added = 0, updated = 0, skipped = 0;
 
   for (const variant of variantList) {
     const variantId = variant?.id;
-    if (!variantId) {
-      skipped++;
-      continue;
-    }
+    if (!variantId) { skipped++; continue; }
 
     try {
       const detailsRes = await fetch(`https://api.printful.com/store/variants/${variantId}`, {
@@ -56,12 +51,8 @@ async function sync(mode) {
       const files = v.files;
       const image = files?.find(f => f.type === "preview")?.preview_url || "";
 
-      if (!productName || !variantName || !price) {
-        skipped++;
-        continue;
-      }
+      if (!productName || !variantName || !price) { skipped++; continue; }
 
-      // Remove any previous [SKIPPED] tags from the name
       const cleanProductName = productName.replace(/^\[SKIPPED\]\s*/, "");
       const title = `${cleanProductName} - ${variantName}`;
 
@@ -75,7 +66,6 @@ async function sync(mode) {
         mode,
       };
 
-      // Check if this variant_id already exists in metadata
       const existing = await stripe.products.search({
         query: `metadata['printful_variant_id']:'${variantId}'`,
       });
@@ -89,7 +79,7 @@ async function sync(mode) {
         if (needsUpdate && !DRY_RUN) {
           await stripe.products.update(productId, {
             metadata,
-            name: title, // also update name if it had [SKIPPED] before
+            name: title,
           });
           updated++;
         } else {
@@ -97,10 +87,7 @@ async function sync(mode) {
         }
       } else {
         if (!DRY_RUN) {
-          const created = await stripe.products.create({
-            name: title,
-            metadata,
-          });
+          const created = await stripe.products.create({ name: title, metadata });
           productId = created.id;
           added++;
         } else {
