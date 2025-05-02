@@ -70,7 +70,7 @@ async function sync() {
             size: size || "",
             color: color || "",
             image_url,
-            printful_variant_id: String(printful_variant_id),
+            printful_store_variant_id: String(printful_variant_id), // ✅ THIS FIXED LINE
           },
         });
 

@@ -7,8 +7,6 @@ const STRIPE_SECRET_TEST = Deno.env.get("STRIPE_SECRET_TEST");
 const STRIPE_SECRET_LIVE = Deno.env.get("STRIPE_SECRET_KEY");
 const STRIPE_WEBHOOK_SECRET_TEST = Deno.env.get("STRIPE_WEBHOOK_SECRET_TEST");
 const PRINTFUL_API_KEY = Deno.env.get("PRINTFUL_API_KEY");
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "https://www.crystalthedeveloper.ca",
@@ -34,68 +32,28 @@ type StripeSession = {
   customer_details?: { email?: string };
 };
 
-type StripeLineItem = { quantity: number; price: { id: string } };
+type StripeLineItem = {
+  quantity: number;
+  price: {
+    id: string;
+    metadata?: Record<string, string>;
+  };
+};
 type StripeLineItemResponse = { data: StripeLineItem[] };
 type StripeEvent = { type: "checkout.session.completed"; data: { object: StripeSession } };
-
-interface PrintfulFile { type: string; preview_url?: string }
-interface PrintfulVariantResponse { result?: { files?: PrintfulFile[] } }
-
-interface VariantMapping {
-  printful_catalog_variant_id: string;
-  printful_store_variant_id: string;
-}
-
-async function getMappedVariant(stripePriceId: string, mode: "test" | "live"): Promise<VariantMapping | null> {
-  const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/variant_mappings?select=printful_catalog_variant_id,printful_store_variant_id&stripe_price_id=eq.${stripePriceId}&mode=eq.${mode}`,
-    {
-      headers: {
-        apikey: SUPABASE_SERVICE_ROLE_KEY!,
-        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-        Accept: "application/json",
-      },
-    }
-  );
-
-  const data = await res.json();
-  if (!res.ok || !Array.isArray(data) || data.length === 0) {
-    console.warn(`⚠️ No mapping found for Stripe price ID ${stripePriceId} in ${mode} mode`);
-    return null;
-  }
-
-  return {
-    printful_catalog_variant_id: data[0].printful_catalog_variant_id,
-    printful_store_variant_id: data[0].printful_store_variant_id,
-  };
-}
-
-async function getPrintfulImageURL(storeVariantId: string): Promise<string | null> {
-  const res = await fetch(`https://api.printful.com/store/variants/${storeVariantId}`, {
-    headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
-  });
-
-  const data: PrintfulVariantResponse = await res.json();
-  if (!res.ok || !data.result?.files) {
-    console.error(`❌ Failed to fetch image for store variant ${storeVariantId}:`, data);
-    return null;
-  }
-
-  const file = data.result.files.find(f => f.type === "preview");
-  return file?.preview_url ?? null;
-}
 
 serve(async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") return new Response("OK", { status: 200, headers: corsHeaders });
   if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405, headers: corsHeaders });
 
-  if (!STRIPE_SECRET_TEST || !STRIPE_WEBHOOK_SECRET_TEST || !PRINTFUL_API_KEY || !SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-    console.error("❌ Missing environment variables.");
+  const sig = req.headers.get("Stripe-Signature");
+  const bodyBuffer = await req.arrayBuffer();
+
+  if (!STRIPE_WEBHOOK_SECRET_TEST || !PRINTFUL_API_KEY) {
+    console.error("❌ Missing required environment variables.");
     return new Response("Server misconfiguration", { status: 500, headers: corsHeaders });
   }
 
-  const sig = req.headers.get("Stripe-Signature");
-  const bodyBuffer = await req.arrayBuffer();
   const isValid = await verifyStripeSignature(bodyBuffer, sig, STRIPE_WEBHOOK_SECRET_TEST);
   if (!isValid) {
     console.error("❌ Invalid Stripe signature");
@@ -115,6 +73,11 @@ serve(async (req: Request): Promise<Response> => {
     const mode: "test" | "live" = session.livemode ? "live" : "test";
     const stripeSecret = mode === "live" ? STRIPE_SECRET_LIVE : STRIPE_SECRET_TEST;
 
+    if (!stripeSecret) {
+      console.error(`❌ Stripe secret not set for mode: ${mode}`);
+      return new Response("Stripe secret missing", { status: 500, headers: corsHeaders });
+    }
+
     console.log("📦 Webhook triggered for mode:", mode);
 
     const itemsRes = await fetch(`https://api.stripe.com/v1/checkout/sessions/${session.id}/line_items`, {
@@ -127,20 +90,18 @@ serve(async (req: Request): Promise<Response> => {
       return new Response("Failed to fetch line items", { status: 500, headers: corsHeaders });
     }
 
-    const items = await Promise.all(
-      itemsData.data.map(async (item) => {
-        const stripePriceId = item.price.id;
-        const variantMapping = await getMappedVariant(stripePriceId, mode);
-        if (!variantMapping) return null;
+    const items = itemsData.data.map((item) => {
+      const variant_id = item.price?.metadata?.printful_store_variant_id;
+      if (!variant_id) {
+        console.warn("⚠️ Missing printful_store_variant_id in Stripe price metadata for:", item.price.id);
+        return null;
+      }
 
-        const fileUrl = await getPrintfulImageURL(variantMapping.printful_store_variant_id);
-        return {
-          variant_id: Number(variantMapping.printful_store_variant_id),
-          quantity: item.quantity,
-          ...(fileUrl ? { files: [{ url: fileUrl }] } : {}),
-        };
-      })
-    );
+      return {
+        variant_id: Number(variant_id),
+        quantity: item.quantity,
+      };
+    });
 
     const filteredItems = items.filter(Boolean);
     if (!filteredItems.length) {
