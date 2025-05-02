@@ -36,10 +36,11 @@ jobs:
           MODE: live
           DRY_RUN: false
           PRINTFUL_API_KEY: ${{ secrets.PRINTFUL_API_KEY }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }} # ✅ ADD THIS LINE
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node clean-broken-mappings.js
-
+      
       - name: Show logs on failure
         if: failure()
         run: |
