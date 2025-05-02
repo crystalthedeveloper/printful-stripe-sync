@@ -24,7 +24,8 @@ async function sync(mode) {
   const res = await fetch("https://api.printful.com/store/variants", {
     headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
   });
-  const variantList = (await res.json()).result;
+
+  const { result: variantList = [] } = await res.json();
 
   for (const variant of variantList) {
     try {
@@ -32,10 +33,11 @@ async function sync(mode) {
       const variantDetailsRes = await fetch(`https://api.printful.com/store/variants/${variantId}`, {
         headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
       });
+
       const variantData = await variantDetailsRes.json();
       const v = variantData.result;
 
-      if (!v?.product?.name || !v.name || !v.retail_price) {
+      if (!v?.name || !v?.product?.name || !v?.retail_price) {
         console.warn(`⚠️ Skipping variant ${variantId} due to missing name, product, or price`);
         continue;
       }
@@ -43,26 +45,26 @@ async function sync(mode) {
       const productName = v.product.name;
       const variantName = v.name;
       const retail_price = v.retail_price;
+      const printful_variant_id = v.id;
       const color = v.color;
       const size = v.size;
       const files = v.files;
+
       const imageFile = files?.find(f => f.type === "preview");
       const image_url = imageFile?.preview_url || "";
 
       const expectedMetadata = {
         printful_product_name: productName,
         printful_variant_name: variantName,
-        printful_variant_id: String(variantId),
+        printful_variant_id: String(printful_variant_id),
         color: color || "",
         size: size || "",
         image_url,
         mode,
       };
 
-      const productLabel = `${productName} - ${variantName}`;
-
       const existingProducts = await stripe.products.search({
-        query: `name:"${productLabel}"`,
+        query: `name:"${productName} - ${variantName}"`,
       });
 
       if (existingProducts.data.length > 0) {
@@ -80,13 +82,13 @@ async function sync(mode) {
         const prices = await stripe.prices.list({ product: existingProduct.id, limit: 10 });
         const price = prices.data.find(p => !p.deleted);
 
-        const hasCorrectMeta = price?.metadata?.printful_store_variant_id === String(variantId);
+        const hasCorrectMeta = price?.metadata?.printful_store_variant_id === String(printful_variant_id);
 
         if (!hasCorrectMeta && price && !DRY_RUN) {
           await stripe.prices.update(price.id, {
             metadata: {
               ...price.metadata,
-              printful_store_variant_id: String(variantId),
+              printful_store_variant_id: String(printful_variant_id),
             },
           });
           console.log(`🔄 Updated price metadata: ${variantName} (${mode})`);
@@ -96,7 +98,7 @@ async function sync(mode) {
       } else {
         if (!DRY_RUN) {
           const newProduct = await stripe.products.create({
-            name: productLabel,
+            name: `${productName} - ${variantName}`,
             metadata: expectedMetadata,
           });
 
@@ -108,7 +110,7 @@ async function sync(mode) {
               size: size || "",
               color: color || "",
               image_url,
-              printful_store_variant_id: String(variantId),
+              printful_store_variant_id: String(printful_variant_id),
             },
           });
 
