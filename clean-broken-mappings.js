@@ -1,5 +1,5 @@
 // clean-duplicate-stripe-products.js
-// Archives Stripe products with duplicate names (TEST + LIVE)
+// Deletes Stripe products with duplicate names (TEST + LIVE)
 
 import dotenv from "dotenv";
 import Stripe from "stripe";
@@ -34,10 +34,10 @@ async function getAllStripeProducts(stripe) {
 
 async function removeDuplicates(mode) {
   const stripe = new Stripe(STRIPE_KEYS[mode], { apiVersion: "2023-10-16" });
-  console.log(`🧹 Cleaning duplicates in ${mode.toUpperCase()} mode...`);
+  console.log(`🧹 Deleting duplicate Stripe products in ${mode.toUpperCase()} mode...`);
 
   const products = await getAllStripeProducts(stripe);
-  const seen = new Map(); // name -> [products[]]
+  const seen = new Map(); // name => [product, product, ...]
 
   for (const product of products) {
     if (!seen.has(product.name)) {
@@ -46,28 +46,27 @@ async function removeDuplicates(mode) {
     seen.get(product.name).push(product);
   }
 
-  for (const [name, entries] of seen.entries()) {
-    if (entries.length > 1) {
-      // Sort by created date, keep the latest
-      entries.sort((a, b) => b.created - a.created);
-      const [keep, ...duplicates] = entries;
+  for (const [name, group] of seen.entries()) {
+    if (group.length > 1) {
+      group.sort((a, b) => b.created - a.created); // keep newest
+      const [keep, ...duplicates] = group;
 
       for (const dup of duplicates) {
-        if (!DRY_RUN) {
-          try {
-            await stripe.products.update(dup.id, { active: false });
-            console.log(`🗑️ Archived duplicate product: ${dup.id} (${name})`);
-          } catch (err) {
-            console.error(`❌ Failed to archive product ${dup.id}:`, err.message);
+        try {
+          if (DRY_RUN) {
+            console.log(`🧪 Would delete product: ${dup.id} (${name})`);
+          } else {
+            await stripe.products.del(dup.id);
+            console.log(`🗑️ Deleted duplicate product: ${dup.id} (${name})`);
           }
-        } else {
-          console.log(`🧪 Would archive duplicate: ${dup.id} (${name})`);
+        } catch (err) {
+          console.error(`❌ Failed to delete product ${dup.id}:`, err.message);
         }
       }
     }
   }
 
-  console.log(`✅ Done cleaning ${mode.toUpperCase()} duplicates.`);
+  console.log(`✅ Duplicate cleanup finished for ${mode.toUpperCase()}`);
 }
 
 async function run() {
