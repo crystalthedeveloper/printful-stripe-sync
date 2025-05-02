@@ -1,4 +1,4 @@
-// Deactivates all prices and deletes archived products in LIVE mode
+// Deletes archived Stripe products in LIVE mode (only after deleting all their prices)
 
 import dotenv from "dotenv";
 import Stripe from "stripe";
@@ -14,7 +14,7 @@ if (!STRIPE_SECRET_KEY) {
 const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
 
 async function deleteArchivedProducts() {
-  console.log("🧹 Cleaning up archived products in LIVE mode...");
+  console.log("🧹 Deleting ARCHIVED products in LIVE mode...");
 
   let deletedCount = 0;
   let hasMore = true;
@@ -29,20 +29,21 @@ async function deleteArchivedProducts() {
 
     for (const product of res.data) {
       try {
+        // Step 1: Delete prices
         const prices = await stripe.prices.list({ product: product.id, limit: 100 });
-
         for (const price of prices.data) {
-          if (price.active) {
+          if (!price.deleted) {
             if (DRY_RUN) {
-              console.log(`🧪 Would deactivate price: ${price.id}`);
+              console.log(`🧪 Would delete price: ${price.id}`);
             } else {
               await stripe.prices.update(price.id, { active: false });
-              console.log(`⛔ Deactivated price: ${price.id}`);
+              await stripe.prices.del(price.id); // 💥 Use correct method
+              console.log(`🗑️ Deleted price: ${price.id}`);
             }
           }
         }
 
-        // Try to delete product after all prices are deactivated
+        // Step 2: Delete the product
         if (DRY_RUN) {
           console.log(`🧪 Would delete product: ${product.id} (${product.name})`);
         } else {
