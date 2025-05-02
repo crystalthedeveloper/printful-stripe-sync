@@ -57,8 +57,8 @@ async function sync(mode) {
         continue;
       }
 
-      const cleanProductName = productName.replace(/^\[SKIPPED\]\s*/, "");
-      const title = `${cleanProductName} - ${variantName}`;
+      const cleanProductName = productName.replace(/^\[SKIPPED\]\s*/, "").trim();
+      const title = `${cleanProductName} - ${variantName}`.trim();
 
       const metadata = {
         printful_product_name: cleanProductName,
@@ -70,6 +70,7 @@ async function sync(mode) {
         mode,
       };
 
+      // 🔍 Check if product with same variant ID already exists
       const existing = await stripe.products.search({
         query: `metadata['printful_variant_id']:'${variantId}'`,
       });
@@ -96,6 +97,7 @@ async function sync(mode) {
         }
       }
 
+      // 🎯 Check price
       const prices = await stripe.prices.list({ product: productId, limit: 100 });
       const hasPrice = prices.data.some(p =>
         p.metadata?.printful_store_variant_id === String(variantId)
@@ -114,6 +116,7 @@ async function sync(mode) {
           },
         });
       }
+
     } catch (err) {
       skipped++;
       console.error(`❌ Failed to sync variant ${variant?.id}: ${err.message}`);

@@ -38,6 +38,9 @@ async function reactivateArchivedProducts(mode) {
   console.log(`🧹 Reactivating archived products in ${mode.toUpperCase()}...`);
 
   const archived = await getAllStripeProducts(stripe, { active: false });
+  const activeProducts = await getAllStripeProducts(stripe, { active: true });
+
+  const activeNames = new Set(activeProducts.map(p => p.name.replace(/^\[SKIPPED\]\s*/, "").trim()));
 
   let reactivatedProducts = 0;
   let deactivatedPrices = 0;
@@ -45,8 +48,17 @@ async function reactivateArchivedProducts(mode) {
 
   for (const product of archived) {
     try {
-      const prices = await stripe.prices.list({ product: product.id, limit: 100 });
+      const originalName = product.name;
+      const cleanName = originalName.replace(/^\[SKIPPED\]\s*/, "").trim();
 
+      // Skip if another active product already uses this name
+      if (activeNames.has(cleanName)) {
+        console.log(`⚠️ Skipping reactivation — duplicate name exists: "${cleanName}"`);
+        continue;
+      }
+
+      // Deactivate any active prices just in case
+      const prices = await stripe.prices.list({ product: product.id, limit: 100 });
       for (const price of prices.data) {
         if (price.active && !DRY_RUN) {
           await stripe.prices.update(price.id, { active: false });
@@ -55,14 +67,14 @@ async function reactivateArchivedProducts(mode) {
       }
 
       if (!DRY_RUN) {
-        const cleanName = product.name.replace(/^\[SKIPPED\]\s*/, "");
-
         await stripe.products.update(product.id, {
           name: cleanName,
           active: true,
         });
-
         reactivatedProducts++;
+        console.log(`✅ Reactivated product: ${cleanName}`);
+      } else {
+        console.log(`🧪 Would reactivate: ${cleanName}`);
       }
 
     } catch (err) {
