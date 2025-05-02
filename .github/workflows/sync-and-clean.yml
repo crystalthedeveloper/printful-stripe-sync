@@ -3,7 +3,7 @@ name: Sync Printful to Stripe & Clean Broken Mappings
 on:
   schedule:
     - cron: '0 6 * * *'  # Daily at 6 AM UTC
-  workflow_dispatch:     # Manual trigger
+  workflow_dispatch:
 
 jobs:
   sync-and-clean:
@@ -20,7 +20,7 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Run sync script
+      - name: Run sync script (Printful → Stripe)
         env:
           MODE: live
           DRY_RUN: false
@@ -31,13 +31,15 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node sync-printful-to-stripe.js
 
-      - name: Run clean broken mappings (delete archived in LIVE)
+      - name: Run clean broken mappings (fix metadata / deactivate bad prices)
         env:
           DRY_RUN: false
+          PRINTFUL_API_KEY: ${{ secrets.PRINTFUL_API_KEY }}
+          STRIPE_SECRET_TEST: ${{ secrets.STRIPE_SECRET_TEST }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
         run: node clean-broken-mappings.js
 
-      - name: Remove duplicate products (delete TEST + LIVE)
+      - name: Remove duplicate products (by name) from TEST and LIVE
         env:
           DRY_RUN: false
           STRIPE_SECRET_TEST: ${{ secrets.STRIPE_SECRET_TEST }}
@@ -46,5 +48,4 @@ jobs:
 
       - name: Show logs on failure
         if: failure()
-        run: |
-          echo "❌ Workflow failed. Check output above or logs if configured."
+        run: echo "❌ Workflow failed. Check logs above for details."
