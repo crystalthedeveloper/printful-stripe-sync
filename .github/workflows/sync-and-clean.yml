@@ -1,4 +1,4 @@
-name: Sync Printful to Stripe & Clean Broken Mappings
+name: Sync Printful to Stripe & Clean Duplicates
 
 on:
   schedule:
@@ -22,29 +22,18 @@ jobs:
 
       - name: Run sync script (Printful → Stripe)
         env:
-          MODE: live
           DRY_RUN: false
+          PRINTFUL_API_KEY: ${{ secrets.PRINTFUL_API_KEY }}
           STRIPE_SECRET_TEST: ${{ secrets.STRIPE_SECRET_TEST }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
-          PRINTFUL_API_KEY: ${{ secrets.PRINTFUL_API_KEY }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node sync-printful-to-stripe.js
 
-      - name: Run clean broken mappings (fix metadata / deactivate bad prices)
+      - name: Remove duplicate products by name (TEST + LIVE)
         env:
           DRY_RUN: false
-          PRINTFUL_API_KEY: ${{ secrets.PRINTFUL_API_KEY }}
           STRIPE_SECRET_TEST: ${{ secrets.STRIPE_SECRET_TEST }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
         run: node clean-broken-mappings.js
-
-      - name: Remove duplicate products (by name) from TEST and LIVE
-        env:
-          DRY_RUN: false
-          STRIPE_SECRET_TEST: ${{ secrets.STRIPE_SECRET_TEST }}
-          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
-        run: node clean-duplicate-stripe-products.js
 
       - name: Show logs on failure
         if: failure()
