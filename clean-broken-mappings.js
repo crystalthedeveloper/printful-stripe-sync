@@ -1,5 +1,3 @@
-// Deactivates all prices and deletes archived Stripe products (LIVE only)
-
 import dotenv from "dotenv";
 import Stripe from "stripe";
 dotenv.config();
@@ -13,8 +11,8 @@ if (!STRIPE_SECRET_KEY) {
 
 const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
 
-async function deleteArchivedProducts() {
-  console.log("🧹 Deleting ARCHIVED products in LIVE mode...");
+async function deleteAllProducts() {
+  console.log("🧨 Deleting ALL Stripe products in LIVE mode...");
 
   let deletedCount = 0;
   let hasMore = true;
@@ -23,42 +21,30 @@ async function deleteArchivedProducts() {
   while (hasMore) {
     const res = await stripe.products.list({
       limit: 100,
-      active: false, // Only archived products
       starting_after,
     });
 
     for (const product of res.data) {
       try {
+        // Step 1: Deactivate and remove prices
         const prices = await stripe.prices.list({ product: product.id, limit: 100 });
-
-        let allPricesInactive = true;
-
         for (const price of prices.data) {
-          if (price.active) {
-            allPricesInactive = false;
-            if (!DRY_RUN) {
-              await stripe.prices.update(price.id, { active: false });
-              console.log(`⛔ Deactivated price: ${price.id}`);
-            } else {
-              console.log(`🧪 Would deactivate price: ${price.id}`);
-            }
+          if (price.active && !DRY_RUN) {
+            await stripe.prices.update(price.id, { active: false });
+            console.log(`⛔ Deactivated price: ${price.id}`);
           }
         }
 
-        // Delete product only if all prices are now inactive
-        if (allPricesInactive) {
-          if (!DRY_RUN) {
-            await stripe.products.del(product.id);
-            console.log(`🗑️ Deleted product: ${product.id} (${product.name})`);
-            deletedCount++;
-          } else {
-            console.log(`🧪 Would delete product: ${product.id} (${product.name})`);
-          }
+        // Step 2: Delete product
+        if (!DRY_RUN) {
+          await stripe.products.del(product.id);
+          console.log(`🗑️ Deleted product: ${product.id} (${product.name})`);
+          deletedCount++;
         } else {
-          console.warn(`⚠️ Skipped deletion. Some prices are still active for product: ${product.id}`);
+          console.log(`🧪 Would delete product: ${product.id} (${product.name})`);
         }
       } catch (err) {
-        console.error(`❌ Failed to process product ${product.id}:`, err.message);
+        console.error(`❌ Failed to delete product ${product.id}:`, err.message);
       }
     }
 
@@ -68,7 +54,7 @@ async function deleteArchivedProducts() {
     }
   }
 
-  console.log(`✅ Deleted ${deletedCount} archived products in LIVE mode.`);
+  console.log(`✅ Deleted ${deletedCount} products from Stripe.`);
 }
 
-deleteArchivedProducts();
+deleteAllProducts();
