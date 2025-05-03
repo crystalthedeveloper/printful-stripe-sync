@@ -70,10 +70,17 @@ async function sync(mode) {
         mode,
       };
 
-      // 🔍 Check if product with same variant ID already exists
-      const existing = await stripe.products.search({
+      // ✅ Try finding by printful_variant_id first
+      let existing = await stripe.products.search({
         query: `metadata['printful_variant_id']:'${variantId}'`,
       });
+
+      // 🔁 Fallback: try searching by name
+      if (existing.data.length === 0) {
+        existing = await stripe.products.search({
+          query: `name:"${title}"`,
+        });
+      }
 
       let productId;
       if (existing.data.length > 0) {
@@ -97,7 +104,7 @@ async function sync(mode) {
         }
       }
 
-      // 🎯 Check price
+      // 💸 Ensure price exists
       const prices = await stripe.prices.list({ product: productId, limit: 100 });
       const hasPrice = prices.data.some(p =>
         p.metadata?.printful_store_variant_id === String(variantId)
