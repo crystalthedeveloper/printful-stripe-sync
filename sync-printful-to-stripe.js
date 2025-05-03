@@ -25,18 +25,26 @@ async function sync(mode) {
   });
   const { result: variantList = [] } = await res.json();
 
+  console.log(`📦 Fetched ${variantList.length} Printful variants`);
+
   let added = 0, updated = 0, errored = 0;
 
   for (const variant of variantList) {
     const variantId = variant?.id;
-    if (!variantId) continue;
+    if (!variantId) {
+      console.warn("⚠️ Skipping variant with missing ID");
+      continue;
+    }
 
     try {
       const detailsRes = await fetch(`https://api.printful.com/store/variants/${variantId}`, {
         headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
       });
       const { result: v } = await detailsRes.json();
-      if (!v) continue;
+      if (!v) {
+        console.warn(`⚠️ Skipping variant ${variantId} — no detail data`);
+        continue;
+      }
 
       let productName = v.product?.name;
       if (!productName && v?.product_id) {
@@ -51,7 +59,10 @@ async function sync(mode) {
       const price = v.retail_price;
       const image = v.files?.find(f => f.type === "preview")?.preview_url || "";
 
-      if (!productName || !variantName || !price) continue;
+      if (!productName || !variantName || !price) {
+        console.warn(`⚠️ Skipping incomplete variant ${variantId} — missing productName, variantName, or price`);
+        continue;
+      }
 
       const cleanProductName = productName.replace(/^\[SKIPPED\]\s*/, "").trim();
       const title = `${cleanProductName} - ${variantName}`.trim();
@@ -66,7 +77,8 @@ async function sync(mode) {
         mode,
       };
 
-      // Always try to find existing by metadata
+      console.log(`🔍 Looking for existing Stripe product for variant ID ${variantId}...`);
+
       const existing = await stripe.products.search({
         query: `metadata['printful_variant_id']:'${variantId}'`,
       });
@@ -76,6 +88,8 @@ async function sync(mode) {
         const product = existing.data[0];
         productId = product.id;
 
+        console.log(`✅ Found existing product: ${title} (${productId})`);
+
         if (!DRY_RUN) {
           await stripe.products.update(productId, {
             name: title,
@@ -83,8 +97,11 @@ async function sync(mode) {
             active: true,
           });
         }
+
+        console.log(`🔁 Updated product ${productId}`);
         updated++;
       } else {
+        console.log(`➕ Creating new product: ${title}`);
         if (!DRY_RUN) {
           const created = await stripe.products.create({
             name: title,
@@ -96,24 +113,28 @@ async function sync(mode) {
         added++;
       }
 
-      // Ensure price is created with correct metadata
       const prices = await stripe.prices.list({ product: productId, limit: 100 });
       const alreadyExists = prices.data.some(p =>
         p.metadata?.printful_store_variant_id === String(variantId)
       );
 
-      if (!alreadyExists && !DRY_RUN) {
-        await stripe.prices.create({
-          product: productId,
-          unit_amount: Math.round(parseFloat(price) * 100),
-          currency: "cad",
-          metadata: {
-            size: v.size || "",
-            color: v.color || "",
-            image_url: image,
-            printful_store_variant_id: String(variantId),
-          },
-        });
+      if (!alreadyExists) {
+        console.log(`💰 Creating price for ${title} (${price} CAD)`);
+        if (!DRY_RUN) {
+          await stripe.prices.create({
+            product: productId,
+            unit_amount: Math.round(parseFloat(price) * 100),
+            currency: "cad",
+            metadata: {
+              size: v.size || "",
+              color: v.color || "",
+              image_url: image,
+              printful_store_variant_id: String(variantId),
+            },
+          });
+        }
+      } else {
+        console.log(`✅ Price already exists for variant ${variantId}`);
       }
 
     } catch (err) {
@@ -122,7 +143,7 @@ async function sync(mode) {
     }
   }
 
-  console.log(`✅ ${mode.toUpperCase()} SYNC → Added: ${added}, Updated: ${updated}, Errors: ${errored}`);
+  console.log(`✅ ${mode.toUpperCase()} SYNC COMPLETE → Added: ${added}, Updated: ${updated}, Errors: ${errored}`);
 }
 
 async function run() {
