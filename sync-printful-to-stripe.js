@@ -6,19 +6,15 @@ dotenv.config();
 
 const DRY_RUN = process.env.DRY_RUN === "true";
 const PRINTFUL_API_KEY = process.env.PRINTFUL_API_KEY;
-const STRIPE_KEYS = {
-  test: process.env.STRIPE_SECRET_TEST,
-  live: process.env.STRIPE_SECRET_KEY,
-};
+const STRIPE_KEY = process.env.STRIPE_SECRET_KEY; // Only one key, used for both test + live
 
-if (!PRINTFUL_API_KEY || !STRIPE_KEYS.test || !STRIPE_KEYS.live) {
+if (!PRINTFUL_API_KEY || !STRIPE_KEY) {
   throw new Error("❌ Missing API keys in environment.");
 }
 
-async function sync(mode) {
-  const stripe = new Stripe(STRIPE_KEYS[mode], { apiVersion: "2023-10-16" });
-  console.log(`🔄 Syncing Printful → Stripe in ${mode.toUpperCase()} mode...`);
+const stripe = new Stripe(STRIPE_KEY, { apiVersion: "2023-10-16" });
 
+async function sync() {
   const res = await fetch("https://api.printful.com/sync/products", {
     headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
   });
@@ -32,9 +28,11 @@ async function sync(mode) {
 
   for (const product of productList) {
     const syncProductId = product.id;
+
     const detailRes = await fetch(`https://api.printful.com/sync/products/${syncProductId}`, {
       headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
     });
+
     const detailJson = await detailRes.json();
     const item = detailJson.result;
     const productName = item.sync_product.name;
@@ -48,7 +46,6 @@ async function sync(mode) {
       const price = v.retail_price;
       const image = item.sync_product.thumbnail_url;
 
-      // Skip if missing data
       if (!variantId || !productName || !variantName || !price) {
         console.warn(`⚠️ Skipping invalid variant: ${productName} - ${variantName}`);
         continue;
@@ -60,12 +57,12 @@ async function sync(mode) {
         printful_variant_name: variantName,
         printful_variant_id: String(variantId),
         image_url: image,
-        mode,
       };
 
       try {
+        // Search all products, regardless of mode
         const existing = await stripe.products.search({
-          query: `metadata['printful_variant_id']:'${variantId}' AND metadata['mode']:'${mode}'`,
+          query: `metadata['printful_variant_id']:'${variantId}'`,
         });
 
         let productId;
@@ -114,12 +111,7 @@ async function sync(mode) {
     }
   }
 
-  console.log(`✅ ${mode.toUpperCase()} SYNC COMPLETE → Added: ${added}, Updated: ${updated}, Errors: ${errored}`);
+  console.log(`✅ SYNC COMPLETE → Added: ${added}, Updated: ${updated}, Errors: ${errored}`);
 }
 
-async function run() {
-  await sync("test");
-  await sync("live");
-}
-
-run();
+sync();
