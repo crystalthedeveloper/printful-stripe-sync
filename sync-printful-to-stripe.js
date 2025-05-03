@@ -80,8 +80,8 @@ async function sync(mode) {
 
       try {
         const existing = await stripe.products.search({
-          query: `metadata['printful_variant_id']:'${variantId}'`,
-        });
+          query: `metadata['printful_variant_id']:'${variantId}' AND metadata['mode']:'${mode}'`,
+        });        
 
         let productId;
         if (existing.data.length > 0) {
