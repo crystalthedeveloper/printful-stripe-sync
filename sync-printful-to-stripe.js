@@ -19,55 +19,38 @@ async function sync(mode) {
   const stripe = new Stripe(STRIPE_KEYS[mode], { apiVersion: "2023-10-16" });
   console.log(`🔄 Syncing Printful → Stripe in ${mode.toUpperCase()} mode...`);
 
-  const productListRes = await fetch("https://api.printful.com/store/products", {
+  const res = await fetch("https://api.printful.com/sync/products", {
     headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
   });
 
-  const productListJson = await productListRes.json();
+  const json = await res.json();
+  const productList = json.result || [];
 
-  if (!Array.isArray(productListJson.result)) {
-    console.error("❌ Failed to fetch product list from Printful.");
-    console.log("🔎 Full response:", JSON.stringify(productListJson, null, 2));
-    return;
-  }
-
-  const productList = productListJson.result;
-  console.log(`📦 Found ${productList.length} products in Printful store.`);
+  console.log(`📦 Found ${productList.length} synced Printful products`);
 
   let added = 0, updated = 0, errored = 0;
 
   for (const product of productList) {
-    const productId = product.id;
-    console.log(`🔍 Fetching details for product ID ${productId} (${product.name})`);
-
-    const detailRes = await fetch(`https://api.printful.com/store/products/${productId}`, {
+    const syncProductId = product.id;
+    const detailRes = await fetch(`https://api.printful.com/sync/products/${syncProductId}`, {
       headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
     });
-
     const detailJson = await detailRes.json();
-    const variants = detailJson.result?.variants || [];
+    const item = detailJson.result;
+    const productName = item.sync_product.name;
+    const variants = item.sync_variants || [];
 
-    console.log(`🧩 Found ${variants.length} variants for "${product.name}"`);
+    console.log(`🧩 ${productName}: ${variants.length} variants`);
 
-    for (const variant of variants) {
-      const variantId = variant.id;
-      const productName = detailJson.result.name;
-      const variantName = variant.name;
-      const price = variant.retail_price;
-      const image = variant.files?.find(f => f.type === "preview")?.preview_url || "";
+    for (const v of variants) {
+      const variantId = v.variant_id;
+      const variantName = v.name;
+      const price = v.retail_price;
+      const image = item.sync_product.thumbnail_url;
 
-      // ✅ Skip out-of-stock variants
-      const isOutOfStock = variant.is_available === false || variant.stock_status === "out";
-
-      if (isOutOfStock) {
-        console.log(`⛔ Skipping out-of-stock variant: ${productName} - ${variantName}`);
-        continue;
-      }
-
+      // Skip if missing data
       if (!variantId || !productName || !variantName || !price) {
-        console.warn(`⚠️ Skipping invalid variant in product ${productName}`, {
-          variantId, productName, variantName, price
-        });
+        console.warn(`⚠️ Skipping invalid variant: ${productName} - ${variantName}`);
         continue;
       }
 
@@ -76,29 +59,20 @@ async function sync(mode) {
         printful_product_name: productName,
         printful_variant_name: variantName,
         printful_variant_id: String(variantId),
-        color: variant.color || "",
-        size: variant.size || "",
         image_url: image,
         mode,
       };
 
       try {
-        console.log(`🔎 Searching Stripe for variant ID ${variantId} with mode=${mode}`);
         const existing = await stripe.products.search({
           query: `metadata['printful_variant_id']:'${variantId}' AND metadata['mode']:'${mode}'`,
         });
-
-        console.log(`🧪 Found ${existing.data.length} matching products in Stripe`);
 
         let productId;
         if (existing.data.length > 0) {
           productId = existing.data[0].id;
           if (!DRY_RUN) {
-            await stripe.products.update(productId, {
-              name: title,
-              metadata,
-              active: true,
-            });
+            await stripe.products.update(productId, { name: title, metadata, active: true });
           }
           updated++;
           console.log(`🔁 Updated: ${title}`);
@@ -126,15 +100,11 @@ async function sync(mode) {
             unit_amount: Math.round(parseFloat(price) * 100),
             currency: "cad",
             metadata: {
-              size: variant.size || "",
-              color: variant.color || "",
-              image_url: image,
               printful_store_variant_id: String(variantId),
+              image_url: image,
             },
           });
           console.log(`💰 Price created for ${title}`);
-        } else {
-          console.log(`✅ Price already exists for variant ${variantId}`);
         }
 
       } catch (err) {
