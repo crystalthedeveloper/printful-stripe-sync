@@ -54,10 +54,10 @@ async function sync(mode) {
       const image = variant.files?.find(f => f.type === "preview")?.preview_url || "";
 
       // ✅ Skip out-of-stock variants
-      const isAvailable = variant.is_available !== false; // treat undefined as true
-      const quantity = variant.quantity ?? 1; // fallback if quantity field doesn't exist
+      const isOutOfStock =
+        variant.is_available === false || variant.stock_status === "out";
 
-      if (!isAvailable || quantity <= 0) {
+      if (isOutOfStock) {
         console.log(`⛔ Skipping out-of-stock variant: ${productName} - ${variantName}`);
         continue;
       }
