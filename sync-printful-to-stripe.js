@@ -29,14 +29,14 @@ async function sync(mode) {
 
   for (const variant of variantList) {
     const variantId = variant?.id;
-    if (!variantId) { skipped++; continue; }
+    if (!variantId) continue;
 
     try {
       const detailsRes = await fetch(`https://api.printful.com/store/variants/${variantId}`, {
         headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
       });
       const { result: v } = await detailsRes.json();
-      if (!v) { skipped++; continue; }
+      if (!v) continue;
 
       let productName = v.product?.name;
       if (!productName && v?.product_id) {
@@ -49,13 +49,9 @@ async function sync(mode) {
 
       const variantName = v.name;
       const price = v.retail_price;
-      const files = v.files;
-      const image = files?.find(f => f.type === "preview")?.preview_url || "";
+      const image = v.files?.find(f => f.type === "preview")?.preview_url || "";
 
-      if (!productName || !variantName || !price) {
-        skipped++;
-        continue;
-      }
+      if (!productName || !variantName || !price) continue;
 
       const cleanProductName = productName.replace(/^\[SKIPPED\]\s*/, "").trim();
       const title = `${cleanProductName} - ${variantName}`.trim();
@@ -70,16 +66,19 @@ async function sync(mode) {
         mode,
       };
 
-      // ✅ Try finding by printful_variant_id first
+      // 🔍 Try to find by variant ID
       let existing = await stripe.products.search({
         query: `metadata['printful_variant_id']:'${variantId}'`,
       });
 
-      // 🔁 Fallback: try searching by name
+      // 🔁 Fallback to name search
       if (existing.data.length === 0) {
         existing = await stripe.products.search({
           query: `name:"${title}"`,
         });
+        if (existing.data.length) {
+          console.warn(`⚠️ Fallback match by name for "${title}"`);
+        }
       }
 
       let productId;
@@ -100,6 +99,7 @@ async function sync(mode) {
           productId = created.id;
           added++;
         } else {
+          console.log(`🧪 Would add: ${title}`);
           continue;
         }
       }
@@ -126,7 +126,7 @@ async function sync(mode) {
 
     } catch (err) {
       skipped++;
-      console.error(`❌ Failed to sync variant ${variant?.id}: ${err.message}`);
+      console.error(`❌ Failed to sync variant ${variantId}: ${err.message}`);
     }
   }
 
