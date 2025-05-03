@@ -17,59 +17,53 @@ if (!PRINTFUL_API_KEY || !STRIPE_KEYS.test || !STRIPE_KEYS.live) {
 
 async function sync(mode) {
   const stripe = new Stripe(STRIPE_KEYS[mode], { apiVersion: "2023-10-16" });
-  console.log(`🔄 Force syncing Printful variants to Stripe in ${mode.toUpperCase()} mode...`);
+  console.log(`🔄 Syncing Printful → Stripe in ${mode.toUpperCase()} mode...`);
 
-  const res = await fetch("https://api.printful.com/store/variants", {
+  const productListRes = await fetch("https://api.printful.com/store/products", {
     headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
   });
 
-  const json = await res.json();
+  const productListJson = await productListRes.json();
 
-  if (!json.result || !Array.isArray(json.result)) {
-    console.error("❌ Invalid response from Printful API. Expected an array in `result`.");
-    console.log("🔎 Full response:", JSON.stringify(json, null, 2));
+  if (!Array.isArray(productListJson.result)) {
+    console.error("❌ Failed to fetch product list from Printful.");
+    console.log("🔎 Full response:", JSON.stringify(productListJson, null, 2));
     return;
   }
 
-  const variantList = json.result;
-  console.log(`📦 Fetched ${variantList.length} variants`);
+  const productList = productListJson.result;
+  console.log(`📦 Found ${productList.length} products in Printful store.`);
 
   let added = 0, updated = 0, errored = 0;
 
-  for (const variantSummary of variantList) {
-    const variantId = variantSummary?.id || variantSummary?.variant_id;
+  for (const product of productList) {
+    const productId = product.id;
 
-    if (!variantId || typeof variantId !== "number") {
-      console.warn("⚠️ Skipping variant with invalid ID:", JSON.stringify(variantSummary, null, 2));
-      continue;
-    }
+    const detailRes = await fetch(`https://api.printful.com/store/products/${productId}`, {
+      headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
+    });
 
-    try {
-      const detailsRes = await fetch(`https://api.printful.com/store/variants/${variantId}`, {
-        headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
-      });
+    const detailJson = await detailRes.json();
+    const variants = detailJson.result?.variants || [];
 
-      const { result: v } = await detailsRes.json();
-      if (!v) {
-        console.warn(`⚠️ Skipping variant ${variantId} — no detail data`);
+    for (const variant of variants) {
+      const variantId = variant.id;
+      const productName = detailJson.result.name;
+      const variantName = variant.name;
+      const price = variant.retail_price;
+      const image = variant.files?.find(f => f.type === "preview")?.preview_url || "";
+
+      // ✅ Skip out-of-stock variants
+      const isAvailable = variant.is_available !== false; // treat undefined as true
+      const quantity = variant.quantity ?? 1; // fallback if quantity field doesn't exist
+
+      if (!isAvailable || quantity <= 0) {
+        console.log(`⛔ Skipping out-of-stock variant: ${productName} - ${variantName}`);
         continue;
       }
 
-      let productName = v.product?.name;
-      if (!productName && v?.product_id) {
-        const productRes = await fetch(`https://api.printful.com/store/products/${v.product_id}`, {
-          headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
-        });
-        const productJson = await productRes.json();
-        productName = productJson.result?.name;
-      }
-
-      const variantName = v.name;
-      const price = v.retail_price;
-      const image = v.files?.find(f => f.type === "preview")?.preview_url || "";
-
-      if (!productName || !variantName || !price) {
-        console.warn(`⚠️ Skipping incomplete variant ${variantId} — missing name, price, or image`);
+      if (!variantId || !productName || !variantName || !price) {
+        console.warn(`⚠️ Skipping invalid variant in product ${productName}`);
         continue;
       }
 
@@ -78,72 +72,66 @@ async function sync(mode) {
         printful_product_name: productName,
         printful_variant_name: variantName,
         printful_variant_id: String(variantId),
-        color: v.color || "",
-        size: v.size || "",
+        color: variant.color || "",
+        size: variant.size || "",
         image_url: image,
         mode,
       };
 
-      console.log(`🔍 Searching Stripe for variant ID ${variantId}...`);
-
-      const existing = await stripe.products.search({
-        query: `metadata['printful_variant_id']:'${variantId}'`,
-      });
-
-      let productId;
-      if (existing.data.length > 0) {
-        const product = existing.data[0];
-        productId = product.id;
-        console.log(`✅ Found existing product ${product.name} (${productId})`);
-
-        if (!DRY_RUN) {
-          await stripe.products.update(productId, {
-            name: title,
-            metadata,
-            active: true,
-          });
-        }
-
-        console.log(`🔁 Updated product ${productId}`);
-        updated++;
-      } else {
-        console.log(`➕ Creating new product: ${title}`);
-        if (!DRY_RUN) {
-          const created = await stripe.products.create({
-            name: title,
-            metadata,
-            active: true,
-          });
-          productId = created.id;
-        }
-        added++;
-      }
-
-      const prices = await stripe.prices.list({ product: productId, limit: 100 });
-      const hasPrice = prices.data.some(p =>
-        p.metadata?.printful_store_variant_id === String(variantId)
-      );
-
-      if (!hasPrice && !DRY_RUN) {
-        console.log(`💰 Creating price for ${title} ($${price} CAD)`);
-        await stripe.prices.create({
-          product: productId,
-          unit_amount: Math.round(parseFloat(price) * 100),
-          currency: "cad",
-          metadata: {
-            size: v.size || "",
-            color: v.color || "",
-            image_url: image,
-            printful_store_variant_id: String(variantId),
-          },
+      try {
+        const existing = await stripe.products.search({
+          query: `metadata['printful_variant_id']:'${variantId}'`,
         });
-      } else {
-        console.log(`✅ Price already exists for ${variantId}`);
-      }
 
-    } catch (err) {
-      errored++;
-      console.error(`❌ Error syncing variant ${variantId}: ${err.message}`);
+        let productId;
+        if (existing.data.length > 0) {
+          productId = existing.data[0].id;
+          if (!DRY_RUN) {
+            await stripe.products.update(productId, {
+              name: title,
+              metadata,
+              active: true,
+            });
+          }
+          updated++;
+          console.log(`🔁 Updated: ${title}`);
+        } else {
+          if (!DRY_RUN) {
+            const created = await stripe.products.create({
+              name: title,
+              metadata,
+              active: true,
+            });
+            productId = created.id;
+          }
+          added++;
+          console.log(`➕ Created: ${title}`);
+        }
+
+        const prices = await stripe.prices.list({ product: productId, limit: 100 });
+        const hasPrice = prices.data.some(p =>
+          p.metadata?.printful_store_variant_id === String(variantId)
+        );
+
+        if (!hasPrice && !DRY_RUN) {
+          await stripe.prices.create({
+            product: productId,
+            unit_amount: Math.round(parseFloat(price) * 100),
+            currency: "cad",
+            metadata: {
+              size: variant.size || "",
+              color: variant.color || "",
+              image_url: image,
+              printful_store_variant_id: String(variantId),
+            },
+          });
+          console.log(`💰 Price created for ${title}`);
+        }
+
+      } catch (err) {
+        errored++;
+        console.error(`❌ Error syncing variant ${variantId}: ${err.message}`);
+      }
     }
   }
 
