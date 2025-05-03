@@ -1,12 +1,11 @@
 // clean-broken-mappings.js
-// Reactivates archived products and prevents duplicate/dirty names (TEST + LIVE)
+// Safely reactivates archived products, updates metadata/price/image, avoids duplicates (TEST + LIVE)
 
 import dotenv from "dotenv";
 import Stripe from "stripe";
 dotenv.config();
 
 const DRY_RUN = process.env.DRY_RUN === "true";
-
 const STRIPE_KEYS = {
   test: process.env.STRIPE_SECRET_TEST,
   live: process.env.STRIPE_SECRET_KEY,
@@ -33,62 +32,77 @@ async function getAllStripeProducts(stripe, { active } = {}) {
   return products;
 }
 
-async function reactivateArchivedProducts(mode) {
+async function ensureCleanAndUpdated(mode) {
   const stripe = new Stripe(STRIPE_KEYS[mode], { apiVersion: "2023-10-16" });
-  console.log(`🧹 Reactivating archived products in ${mode.toUpperCase()}...`);
+  console.log(`🔍 Verifying ${mode.toUpperCase()} product catalog...`);
 
   const archived = await getAllStripeProducts(stripe, { active: false });
-  const activeProducts = await getAllStripeProducts(stripe, { active: true });
+  const active = await getAllStripeProducts(stripe, { active: true });
 
-  const activeNames = new Set(activeProducts.map(p => p.name.replace(/^\[SKIPPED\]\s*/, "").trim()));
+  const activeMap = new Map(
+    active
+      .filter(p => p.metadata?.printful_variant_id)
+      .map(p => [p.metadata.printful_variant_id, p])
+  );
 
-  let reactivatedProducts = 0;
-  let deactivatedPrices = 0;
+  let updated = 0;
+  let reactivated = 0;
+  let skipped = 0;
   let errors = 0;
 
   for (const product of archived) {
+    const variantId = product.metadata?.printful_variant_id;
+
+    if (!variantId) {
+      console.log(`⚠️ Skipped unnamed archived product: ${product.id}`);
+      skipped++;
+      continue;
+    }
+
+    const live = activeMap.get(variantId);
+    const archivedMeta = product.metadata || {};
+
+    if (live) {
+      // Compare metadata
+      const needsMetaUpdate = Object.entries(archivedMeta).some(
+        ([k, v]) => live.metadata?.[k] !== v
+      );
+
+      if (needsMetaUpdate && !DRY_RUN) {
+        await stripe.products.update(live.id, { metadata: archivedMeta });
+        console.log(`🔁 Updated metadata on active product: ${live.name}`);
+        updated++;
+      } else {
+        console.log(`✅ Active product is clean for variant ${variantId}`);
+      }
+
+      skipped++;
+      continue;
+    }
+
+    // Reactivate archived product and ensure metadata is up to date
     try {
-      const originalName = product.name;
-      const cleanName = originalName.replace(/^\[SKIPPED\]\s*/, "").trim();
-
-      // Skip if another active product already uses this name
-      if (activeNames.has(cleanName)) {
-        console.log(`⚠️ Skipping reactivation — duplicate name exists: "${cleanName}"`);
-        continue;
-      }
-
-      // Deactivate any active prices just in case
-      const prices = await stripe.prices.list({ product: product.id, limit: 100 });
-      for (const price of prices.data) {
-        if (price.active && !DRY_RUN) {
-          await stripe.prices.update(price.id, { active: false });
-          deactivatedPrices++;
-        }
-      }
-
       if (!DRY_RUN) {
         await stripe.products.update(product.id, {
-          name: cleanName,
           active: true,
+          metadata: archivedMeta,
         });
-        reactivatedProducts++;
-        console.log(`✅ Reactivated product: ${cleanName}`);
-      } else {
-        console.log(`🧪 Would reactivate: ${cleanName}`);
       }
 
+      console.log(`🟢 Reactivated: ${product.name}`);
+      reactivated++;
     } catch (err) {
+      console.error(`❌ Failed to reactivate ${product.id}: ${err.message}`);
       errors++;
-      console.error(`❌ Error on ${product.id}: ${err.message}`);
     }
   }
 
-  console.log(`✅ ${mode.toUpperCase()} CLEANUP → Reactivated: ${reactivatedProducts}, Deactivated prices: ${deactivatedPrices}, Errors: ${errors}`);
+  console.log(`✅ ${mode.toUpperCase()} CLEANUP → Reactivated: ${reactivated}, Metadata Updated: ${updated}, Skipped: ${skipped}, Errors: ${errors}`);
 }
 
 async function run() {
-  await reactivateArchivedProducts("test");
-  await reactivateArchivedProducts("live");
+  await ensureCleanAndUpdated("test");
+  await ensureCleanAndUpdated("live");
 }
 
 run();
