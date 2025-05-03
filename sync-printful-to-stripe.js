@@ -23,8 +23,15 @@ async function sync(mode) {
     headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
   });
 
-  const { result: variantList = [] } = await res.json();
+  const json = await res.json();
 
+  if (!json.result || !Array.isArray(json.result)) {
+    console.error("❌ Invalid response from Printful API. Expected an array in `result`.");
+    console.log("🔎 Full response:", JSON.stringify(json, null, 2));
+    return;
+  }
+
+  const variantList = json.result;
   console.log(`📦 Fetched ${variantList.length} variants`);
 
   let added = 0, updated = 0, errored = 0;
@@ -32,8 +39,8 @@ async function sync(mode) {
   for (const variantSummary of variantList) {
     const variantId = variantSummary?.id || variantSummary?.variant_id;
 
-    if (!variantId) {
-      console.warn("⚠️ Skipping variant with missing ID:", JSON.stringify(variantSummary, null, 2));
+    if (!variantId || typeof variantId !== "number") {
+      console.warn("⚠️ Skipping variant with invalid ID:", JSON.stringify(variantSummary, null, 2));
       continue;
     }
 
@@ -112,7 +119,6 @@ async function sync(mode) {
         added++;
       }
 
-      // Check existing prices
       const prices = await stripe.prices.list({ product: productId, limit: 100 });
       const hasPrice = prices.data.some(p =>
         p.metadata?.printful_store_variant_id === String(variantId)
@@ -137,7 +143,7 @@ async function sync(mode) {
 
     } catch (err) {
       errored++;
-      console.error(`❌ Error syncing variant ${variantSummary.id || "[unknown]"}: ${err.message}`);
+      console.error(`❌ Error syncing variant ${variantId}: ${err.message}`);
     }
   }
 
