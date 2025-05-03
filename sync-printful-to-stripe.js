@@ -38,6 +38,7 @@ async function sync(mode) {
 
   for (const product of productList) {
     const productId = product.id;
+    console.log(`🔍 Fetching details for product ID ${productId} (${product.name})`);
 
     const detailRes = await fetch(`https://api.printful.com/store/products/${productId}`, {
       headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
@@ -45,6 +46,8 @@ async function sync(mode) {
 
     const detailJson = await detailRes.json();
     const variants = detailJson.result?.variants || [];
+
+    console.log(`🧩 Found ${variants.length} variants for "${product.name}"`);
 
     for (const variant of variants) {
       const variantId = variant.id;
@@ -54,8 +57,7 @@ async function sync(mode) {
       const image = variant.files?.find(f => f.type === "preview")?.preview_url || "";
 
       // ✅ Skip out-of-stock variants
-      const isOutOfStock =
-        variant.is_available === false || variant.stock_status === "out";
+      const isOutOfStock = variant.is_available === false || variant.stock_status === "out";
 
       if (isOutOfStock) {
         console.log(`⛔ Skipping out-of-stock variant: ${productName} - ${variantName}`);
@@ -63,7 +65,9 @@ async function sync(mode) {
       }
 
       if (!variantId || !productName || !variantName || !price) {
-        console.warn(`⚠️ Skipping invalid variant in product ${productName}`);
+        console.warn(`⚠️ Skipping invalid variant in product ${productName}`, {
+          variantId, productName, variantName, price
+        });
         continue;
       }
 
@@ -79,9 +83,12 @@ async function sync(mode) {
       };
 
       try {
+        console.log(`🔎 Searching Stripe for variant ID ${variantId} with mode=${mode}`);
         const existing = await stripe.products.search({
           query: `metadata['printful_variant_id']:'${variantId}' AND metadata['mode']:'${mode}'`,
-        });        
+        });
+
+        console.log(`🧪 Found ${existing.data.length} matching products in Stripe`);
 
         let productId;
         if (existing.data.length > 0) {
@@ -126,6 +133,8 @@ async function sync(mode) {
             },
           });
           console.log(`💰 Price created for ${title}`);
+        } else {
+          console.log(`✅ Price already exists for variant ${variantId}`);
         }
 
       } catch (err) {
