@@ -6,13 +6,16 @@ import Stripe from "stripe";
 dotenv.config();
 
 const DRY_RUN = process.env.DRY_RUN === "true";
-const STRIPE_KEY = process.env.STRIPE_SECRET_KEY;
+const STRIPE_KEYS = {
+  test: process.env.STRIPE_SECRET_TEST,
+  live: process.env.STRIPE_SECRET_KEY,
+};
 
-if (!STRIPE_KEY) throw new Error("❌ Missing STRIPE_SECRET_KEY");
+if (!STRIPE_KEYS.test || !STRIPE_KEYS.live) {
+  throw new Error("❌ Missing Stripe test/live keys in environment.");
+}
 
-const stripe = new Stripe(STRIPE_KEY, { apiVersion: "2023-10-16" });
-
-async function getAllStripeProducts() {
+async function getAllStripeProducts(stripe) {
   const products = [];
   let hasMore = true;
   let starting_after;
@@ -32,10 +35,11 @@ async function getAllStripeProducts() {
   return products;
 }
 
-async function cleanDuplicateVariants() {
-  console.log("🔍 Checking for duplicate variants...");
+async function cleanDuplicates(mode) {
+  const stripe = new Stripe(STRIPE_KEYS[mode], { apiVersion: "2023-10-16" });
+  console.log(`🔍 Cleaning duplicates in ${mode.toUpperCase()}...`);
 
-  const allProducts = await getAllStripeProducts();
+  const allProducts = await getAllStripeProducts(stripe);
   const byVariant = new Map();
 
   for (const product of allProducts) {
@@ -49,35 +53,38 @@ async function cleanDuplicateVariants() {
     }
   }
 
-  let archived = 0;
-  let errors = 0;
-  let kept = 0;
+  let archived = 0, kept = 0, errors = 0;
 
   for (const [variantId, group] of byVariant.entries()) {
     if (group.length <= 1) continue;
 
-    const [latest, ...duplicates] = group.sort(
+    const [keeper, ...duplicates] = group.sort(
       (a, b) => new Date(b.created) - new Date(a.created)
     );
 
     kept++;
-    console.log(`✅ Keeping: ${latest.name} (${latest.id})`);
+    console.log(`✅ Keeping: ${keeper.name} (${keeper.id})`);
 
-    for (const product of duplicates) {
+    for (const dupe of duplicates) {
       try {
         if (!DRY_RUN) {
-          await stripe.products.update(product.id, { active: false });
+          await stripe.products.update(dupe.id, { active: false });
         }
-        console.log(`🗑️ Archived duplicate: ${product.name} (${product.id})`);
+        console.log(`🗑️ Archived duplicate: ${dupe.name} (${dupe.id})`);
         archived++;
       } catch (err) {
-        console.error(`❌ Error archiving ${product.id}: ${err.message}`);
+        console.error(`❌ Error archiving ${dupe.id}: ${err.message}`);
         errors++;
       }
     }
   }
 
-  console.log(`🎉 CLEANUP DONE → Kept: ${kept}, Archived: ${archived}, Errors: ${errors}`);
+  console.log(`🎉 ${mode.toUpperCase()} CLEANUP → Kept: ${kept}, Archived: ${archived}, Errors: ${errors}`);
 }
 
-cleanDuplicateVariants();
+async function run() {
+  await cleanDuplicates("test");
+  await cleanDuplicates("live");
+}
+
+run();
