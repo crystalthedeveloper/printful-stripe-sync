@@ -2,8 +2,8 @@
  * update-stripe-products.js
  *
  * Purpose: Refresh all existing Stripe products with latest metadata from Printful.
- * - Only updates products that already exist.
- * - Ensures name and metadata match the latest Printful info.
+ * - Only updates products that already exist and include sync_variant_id.
+ * - Ensures Stripe name + metadata stay in sync with Printful.
  */
 
 import dotenv from "dotenv";
@@ -29,15 +29,16 @@ async function run() {
   console.log(`🔄 Updating Stripe product metadata (${MODE.toUpperCase()})`);
   const products = await getAllStripeProducts(stripe);
 
-  let updated = 0,
-    skipped = 0,
-    errored = 0;
+  let updated = 0;
+  let skipped = 0;
+  let errored = 0;
 
   for (const product of products) {
-    const variantId = product.metadata?.sync_variant_id; // ✅ updated metadata key
+    const variantId = product.metadata?.sync_variant_id;
     const syncProductId = product.metadata?.printful_sync_product_id;
 
     if (!variantId || !syncProductId) {
+      console.warn(`⚠️ Skipping product with missing metadata: ${product.name}`);
       skipped++;
       continue;
     }
@@ -52,12 +53,14 @@ async function run() {
         product.name !== title ||
         JSON.stringify(product.metadata) !== JSON.stringify(metadata);
 
-      if (needsUpdate && !DRY_RUN) {
-        await stripe.products.update(product.id, {
-          name: title,
-          metadata,
-          active: true,
-        });
+      if (needsUpdate) {
+        if (!DRY_RUN) {
+          await stripe.products.update(product.id, {
+            name: title,
+            metadata,
+            active: true,
+          });
+        }
         console.log(`🔁 Updated: ${title}`);
         updated++;
       } else {

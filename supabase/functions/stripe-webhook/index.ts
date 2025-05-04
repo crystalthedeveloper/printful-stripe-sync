@@ -76,7 +76,7 @@ serve(async (req: Request): Promise<Response> => {
 
   if (event.type === "checkout.session.completed") {
     const session = event.data.object;
-    console.log("📦 Webhook received — mode:", mode, "Session ID:", session.id);
+    console.log("📦 Stripe webhook received:", { mode, sessionId: session.id });
 
     // Fetch line items
     const itemsRes = await fetch(`https://api.stripe.com/v1/checkout/sessions/${session.id}/line_items`, {
@@ -94,17 +94,16 @@ serve(async (req: Request): Promise<Response> => {
       itemsData.data.map(async (item) => {
         const syncVariantId = item.price?.metadata?.sync_variant_id;
         if (!syncVariantId) {
-          console.warn(`⚠️ Missing sync_variant_id in Stripe metadata: ${item.price.id}`);
+          console.warn(`⚠️ Missing sync_variant_id in metadata: ${item.price.id}`);
           return null;
         }
 
-        // Confirm variant exists in Printful using the store/variants endpoint
-        const res = await fetch(`https://api.printful.com/store/variants/${syncVariantId}`, {
+        const check = await fetch(`https://api.printful.com/store/variants/${syncVariantId}`, {
           headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
         });
 
-        if (!res.ok) {
-          console.warn(`⚠️ Variant ID ${syncVariantId} not found in Printful.`);
+        if (!check.ok) {
+          console.warn(`⚠️ Printful store/variants check failed: ${syncVariantId}`);
           return null;
         }
 
@@ -117,12 +116,12 @@ serve(async (req: Request): Promise<Response> => {
 
     const validItems = items.filter(Boolean);
     if (!validItems.length) {
-      console.warn("⚠️ No valid sync variants to send to Printful. Order skipped.");
+      console.warn("⚠️ No valid items to fulfill — Printful order skipped.");
       return new Response("No valid items to order", { status: 200, headers: corsHeaders });
     }
 
     const shipping = session.shipping_details;
-    const printfulOrder = {
+    const order = {
       recipient: {
         name: shipping?.name || "Customer",
         address1: shipping?.address?.line1 || "",
@@ -143,7 +142,7 @@ serve(async (req: Request): Promise<Response> => {
         Authorization: `Bearer ${PRINTFUL_API_KEY}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(printfulOrder),
+      body: JSON.stringify(order),
     });
 
     const pfData = await pfRes.json();
@@ -152,13 +151,13 @@ serve(async (req: Request): Promise<Response> => {
       return new Response(JSON.stringify(pfData), { status: 500, headers: corsHeaders });
     }
 
-    console.log("✅ Draft order created successfully in Printful:", pfData.id || pfData);
+    console.log("✅ Printful draft order created:", pfData.id || pfData);
   }
 
   return new Response(JSON.stringify({ received: true }), { status: 200, headers: corsHeaders });
 });
 
-// Signature verification helpers
+// Stripe Signature Verification
 function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let result = 0;
@@ -173,7 +172,7 @@ async function verifyStripeSignature(
 ): Promise<boolean> {
   if (!sigHeader) return false;
 
-  const parts = Object.fromEntries(sigHeader.split(",").map((p) => p.split("=")));
+  const parts = Object.fromEntries(sigHeader.split(",").map(p => p.split("=")));
   const timestamp = parts["t"];
   const signature = parts["v1"];
   if (!timestamp || !signature) return false;
@@ -188,7 +187,7 @@ async function verifyStripeSignature(
   );
   const signatureBuffer = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(signedPayload));
   const computedSignature = Array.from(new Uint8Array(signatureBuffer))
-    .map((b) => b.toString(16).padStart(2, "0"))
+    .map(b => b.toString(16).padStart(2, "0"))
     .join("");
 
   return timingSafeEqual(computedSignature, signature);

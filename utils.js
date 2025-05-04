@@ -51,7 +51,7 @@ export async function getPrintfulProducts() {
       const metadata = {
         printful_product_name: productName,
         printful_variant_name: v.name,
-        sync_variant_id: String(v.id), // ✅ Use correct store variant ID
+        sync_variant_id: String(v.id),
         printful_sync_product_id: String(p.id),
         image_url: image,
         size: v.size,
@@ -80,7 +80,7 @@ export async function getPrintfulVariantDetails(productId, variantId) {
   const metadata = {
     printful_product_name: product.sync_product.name,
     printful_variant_name: variant.name,
-    sync_variant_id: String(variant.id), // ✅ correct metadata key
+    sync_variant_id: String(variant.id),
     image_url: product.sync_product.thumbnail_url,
     printful_sync_product_id: String(productId),
     size: variant.size,
@@ -121,12 +121,12 @@ export async function getOrCreateProduct(stripe, title, metadata, DRY_RUN) {
 export async function ensurePriceExists(stripe, productId, price, syncVariantId, image, DRY_RUN) {
   const prices = await stripe.prices.list({ product: productId, limit: 100 });
   const expectedMetadata = {
-    printful_store_variant_id: String(syncVariantId), // for Printful fulfillment
+    sync_variant_id: String(syncVariantId), // ✅ Used by webhook
     image_url: image,
   };
 
   const existing = prices.data.find(p =>
-    p.metadata?.printful_store_variant_id === expectedMetadata.printful_store_variant_id
+    p.metadata?.sync_variant_id === expectedMetadata.sync_variant_id
   );
 
   if (!existing && !DRY_RUN) {
@@ -136,7 +136,7 @@ export async function ensurePriceExists(stripe, productId, price, syncVariantId,
       currency: "cad",
       metadata: expectedMetadata,
     });
-    console.log(`➕ Created price for variant ${syncVariantId}`);
+    console.log(`➕ Created price for sync_variant_id ${syncVariantId}`);
   } else if (existing && !DRY_RUN) {
     await stripe.prices.update(existing.id, { metadata: expectedMetadata });
     console.log(`🔁 Updated metadata on existing price: ${existing.id}`);
