@@ -1,11 +1,3 @@
-/**
- * utils.js
- *
- * Shared helper functions used across Printful→Stripe sync scripts.
- * - Uses sync_variant_id (Printful store variant ID) only.
- * - Ensures accurate metadata and sync with Stripe products/prices.
- */
-
 import fetch from "node-fetch";
 
 // ✅ Retrieve all Stripe products with pagination
@@ -51,7 +43,8 @@ export async function getPrintfulProducts() {
       const metadata = {
         printful_product_name: productName,
         printful_variant_name: variant.name,
-        sync_variant_id: String(variant.id), // ✅ used for fulfillment
+        sync_variant_id: String(variant.id),
+        sku: variant.sku,
         image_url: image,
         size: variant.size,
         color: variant.color,
@@ -81,6 +74,7 @@ export async function getPrintfulVariantDetails(syncVariantId) {
     printful_product_name: variant.product.name,
     printful_variant_name: variant.name,
     sync_variant_id: String(variant.id),
+    sku: variant.sku,
     image_url: variant.product.image,
     size: variant.size,
     color: variant.color,

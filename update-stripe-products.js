@@ -2,8 +2,8 @@
  * update-stripe-products.js
  *
  * Purpose: Refresh all existing Stripe products with latest metadata from Printful.
- * - Only updates products that already exist and include sync_variant_id.
- * - Ensures Stripe name + metadata stay in sync with Printful.
+ * - Only updates products that include sync_variant_id.
+ * - Replaces legacy fields with updated keys (like sku).
  */
 
 import dotenv from "dotenv";
@@ -26,6 +26,7 @@ const stripe = new Stripe(STRIPE_KEY, { apiVersion: "2023-10-16" });
 
 async function run() {
   console.log(`🔄 Updating Stripe product metadata (${MODE.toUpperCase()})`);
+
   const products = await getAllStripeProducts(stripe);
 
   let updated = 0;
@@ -36,7 +37,7 @@ async function run() {
     const variantId = product.metadata?.sync_variant_id;
 
     if (!variantId) {
-      console.warn(`⚠️ Skipping product with missing sync_variant_id: ${product.name}`);
+      console.warn(`⚠️ Skipping product missing sync_variant_id: ${product.name}`);
       skipped++;
       continue;
     }
@@ -44,16 +45,28 @@ async function run() {
     try {
       const { title, metadata } = await getPrintfulVariantDetails(variantId);
 
+      const filteredMetadata = {
+        sync_variant_id: metadata.sync_variant_id,
+        sku: metadata.sku,
+        printful_variant_name: metadata.printful_variant_name,
+        printful_product_name: metadata.printful_product_name,
+        size: metadata.size,
+        color: metadata.color,
+        image_url: metadata.image_url,
+      };
+
       const needsUpdate =
         product.name !== title ||
-        JSON.stringify(product.metadata) !== JSON.stringify(metadata);
+        JSON.stringify(product.metadata) !== JSON.stringify(filteredMetadata);
 
-      if (needsUpdate && !DRY_RUN) {
-        await stripe.products.update(product.id, {
-          name: title,
-          metadata,
-          active: true,
-        });
+      if (needsUpdate) {
+        if (!DRY_RUN) {
+          await stripe.products.update(product.id, {
+            name: title,
+            metadata: filteredMetadata,
+            active: true,
+          });
+        }
         console.log(`🔁 Updated: ${title}`);
         updated++;
       } else {
@@ -70,4 +83,6 @@ async function run() {
   );
 }
 
-run();
+run().catch(err => {
+  console.error("❌ Fatal error:", err.message);
+});

@@ -1,8 +1,10 @@
 /**
- * remove-printful-unused-fields.js
+ * update-stripe-metadata.js
  *
- * Removes unused metadata keys (`printful_variant_id` and `printful_sync_product_id`)
- * from all Stripe products.
+ * Cleans and updates Stripe product metadata:
+ * - Overwrites legacy keys: `printful_variant_id`, `printful_sync_product_id`
+ * - Adds `sku` from sync_variant_id if missing
+ * - Leaves all other keys intact
  */
 
 import dotenv from "dotenv";
@@ -11,16 +13,15 @@ import Stripe from "stripe";
 dotenv.config();
 
 const MODE = process.argv[2] || process.env.MODE || "test";
-const STRIPE_KEY = MODE === "live"
-  ? process.env.STRIPE_SECRET_KEY
-  : process.env.STRIPE_SECRET_TEST;
+const STRIPE_KEY =
+  MODE === "live" ? process.env.STRIPE_SECRET_KEY : process.env.STRIPE_SECRET_TEST;
 
 if (!STRIPE_KEY) throw new Error(`❌ Missing Stripe key for mode: ${MODE.toUpperCase()}`);
 
 const stripe = new Stripe(STRIPE_KEY, { apiVersion: "2023-10-16" });
 
 async function run() {
-  console.log(`🚨 Cleaning up Printful metadata in ${MODE.toUpperCase()} mode`);
+  console.log(`🚨 Overwriting outdated metadata in ${MODE.toUpperCase()} mode`);
 
   const products = [];
   let hasMore = true;
@@ -37,29 +38,42 @@ async function run() {
 
   let updated = 0;
   for (const product of products) {
-    const originalMetadata = { ...product.metadata };
+    const original = { ...product.metadata };
+    const metadata = { ...original };
 
-    // Build new metadata without the unwanted keys
-    const newMetadata = Object.fromEntries(
-      Object.entries(originalMetadata).filter(
-        ([key]) =>
-          key !== "printful_variant_id" &&
-          key !== "printful_sync_product_id"
-      )
-    );
+    let changed = false;
 
-    if (JSON.stringify(newMetadata) !== JSON.stringify(originalMetadata)) {
-      try {
-        await stripe.products.update(product.id, { metadata: newMetadata });
-        console.log(`✅ Cleaned ${product.name} (${product.id})`);
-        updated++;
-      } catch (err) {
-        console.error(`❌ Failed to update ${product.name}: ${err.message}`);
-      }
+    // Rename legacy keys instead of deleting
+    if ("printful_variant_id" in metadata) {
+      metadata.legacy_printful_variant_id = metadata.printful_variant_id;
+      delete metadata.printful_variant_id;
+      changed = true;
+    }
+
+    if ("printful_sync_product_id" in metadata) {
+      metadata.legacy_printful_sync_product_id = metadata.printful_sync_product_id;
+      delete metadata.printful_sync_product_id;
+      changed = true;
+    }
+
+    // Add fallback SKU if missing
+    if (!metadata.sku && (original.sync_variant_id || original.printful_variant_id)) {
+      metadata.sku = original.sku || original.sync_variant_id || original.printful_variant_id;
+      changed = true;
+    }
+
+    if (!changed) continue;
+
+    try {
+      await stripe.products.update(product.id, { metadata });
+      console.log(`✅ Updated: ${product.name} (${product.id})`);
+      updated++;
+    } catch (err) {
+      console.error(`❌ Failed to update ${product.name}: ${err.message}`);
     }
   }
 
-  console.log(`🎉 Done. ${updated} product(s) cleaned in ${MODE.toUpperCase()} mode.`);
+  console.log(`🎉 Done. ${updated} product(s) updated in ${MODE.toUpperCase()} mode.`);
 }
 
 run().catch((err) => {
