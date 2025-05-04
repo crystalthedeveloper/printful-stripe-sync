@@ -1,4 +1,4 @@
-name: Sync Printful to Stripe & Update Metadata
+name: 🔁 Sync Printful to Stripe & Update Metadata
 
 on:
   schedule:
@@ -21,7 +21,7 @@ jobs:
         run: npm install
 
       # SYNC Printful → Stripe for TEST
-      - name: Sync Printful to Stripe (TEST)
+      - name: 🔄 Sync Printful to Stripe (TEST)
         env:
           DRY_RUN: false
           PRINTFUL_API_KEY: ${{ secrets.PRINTFUL_API_KEY }}
@@ -29,7 +29,7 @@ jobs:
         run: node sync-printful-products.js test
 
       # SYNC Printful → Stripe for LIVE
-      - name: Sync Printful to Stripe (LIVE)
+      - name: 🔄 Sync Printful to Stripe (LIVE)
         env:
           DRY_RUN: false
           PRINTFUL_API_KEY: ${{ secrets.PRINTFUL_API_KEY }}
@@ -37,7 +37,7 @@ jobs:
         run: node sync-printful-products.js live
 
       # UPDATE Stripe Products Metadata for TEST
-      - name: Update Stripe product metadata (TEST)
+      - name: 🛠️ Update Stripe Product Metadata (TEST)
         env:
           DRY_RUN: false
           PRINTFUL_API_KEY: ${{ secrets.PRINTFUL_API_KEY }}
@@ -45,13 +45,13 @@ jobs:
         run: node update-stripe-products.js test
 
       # UPDATE Stripe Products Metadata for LIVE
-      - name: Update Stripe product metadata (LIVE)
+      - name: 🛠️ Update Stripe Product Metadata (LIVE)
         env:
           DRY_RUN: false
           PRINTFUL_API_KEY: ${{ secrets.PRINTFUL_API_KEY }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
         run: node update-stripe-products.js live
 
-      - name: Show logs on failure
+      - name: 🔍 Show logs on failure
         if: failure()
         run: echo "❌ Workflow failed. Check logs above for details."

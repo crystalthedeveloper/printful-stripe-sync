@@ -2,10 +2,8 @@
  * utils.js
  *
  * Shared helper functions used across Printful→Stripe sync scripts.
- * Ensures:
- * - Accurate Printful product/variant mapping
- * - Stripe product creation/update with correct metadata
- * - Stripe price creation/update with correct variant IDs
+ * - Uses sync_variant_id (Printful store variant ID) only.
+ * - Ensures accurate metadata and sync with Stripe products/prices.
  */
 
 import fetch from "node-fetch";
@@ -51,8 +49,7 @@ export async function getPrintfulProducts() {
       const metadata = {
         printful_product_name: productName,
         printful_variant_name: v.name,
-        sync_variant_id: String(v.id),
-        printful_sync_product_id: String(p.id),
+        sync_variant_id: String(v.id), // ✅ correct global ID
         image_url: image,
         size: v.size,
         color: v.color,
@@ -64,25 +61,24 @@ export async function getPrintfulProducts() {
   return products;
 }
 
-export async function getPrintfulVariantDetails(productId, variantId) {
+export async function getPrintfulVariantDetails(syncVariantId) {
   const PRINTFUL_API_KEY = process.env.PRINTFUL_API_KEY;
-  const res = await fetch(`https://api.printful.com/sync/products/${productId}`, {
+
+  const res = await fetch(`https://api.printful.com/store/variants/${syncVariantId}`, {
     headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
   });
 
+  if (!res.ok) throw new Error(`Variant ID ${syncVariantId} not found in Printful`);
+
   const json = await res.json();
-  const product = json.result;
-  const variant = product.sync_variants.find(v => String(v.id) === String(variantId));
+  const variant = json.result;
 
-  if (!variant) throw new Error(`Variant ID ${variantId} not found for product ${productId}`);
-
-  const title = `${product.sync_product.name.trim()} - ${variant.name.trim()}`;
+  const title = `${variant.product.name.trim()} - ${variant.name.trim()}`;
   const metadata = {
-    printful_product_name: product.sync_product.name,
+    printful_product_name: variant.product.name,
     printful_variant_name: variant.name,
     sync_variant_id: String(variant.id),
-    image_url: product.sync_product.thumbnail_url,
-    printful_sync_product_id: String(productId),
+    image_url: variant.product.image,
     size: variant.size,
     color: variant.color,
   };
@@ -104,7 +100,9 @@ export async function getOrCreateProduct(stripe, title, metadata, DRY_RUN) {
   }
 
   const list = await stripe.products.list({ limit: 100 });
-  const matchByName = list.data.find(p => p.name.trim().toLowerCase() === title.trim().toLowerCase());
+  const matchByName = list.data.find(p =>
+    p.name.trim().toLowerCase() === title.trim().toLowerCase()
+  );
 
   if (matchByName) {
     console.log(`🛠️ Recovered via name match: ${title}`);
@@ -121,7 +119,7 @@ export async function getOrCreateProduct(stripe, title, metadata, DRY_RUN) {
 export async function ensurePriceExists(stripe, productId, price, syncVariantId, image, DRY_RUN) {
   const prices = await stripe.prices.list({ product: productId, limit: 100 });
   const expectedMetadata = {
-    sync_variant_id: String(syncVariantId), // ✅ Used by webhook
+    sync_variant_id: String(syncVariantId), // ✅ used by webhook
     image_url: image,
   };
 

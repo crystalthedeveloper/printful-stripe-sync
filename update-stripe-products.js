@@ -14,14 +14,12 @@ dotenv.config();
 
 const DRY_RUN = process.env.DRY_RUN === "true";
 const MODE = process.argv[2] || process.env.MODE || "test";
-const STRIPE_KEY =
-  MODE === "live"
-    ? process.env.STRIPE_SECRET_KEY
-    : process.env.STRIPE_SECRET_TEST;
+const STRIPE_KEY = MODE === "live"
+  ? process.env.STRIPE_SECRET_KEY
+  : process.env.STRIPE_SECRET_TEST;
 
 if (!STRIPE_KEY) throw new Error(`❌ Missing Stripe key for mode: ${MODE}`);
-if (!process.env.PRINTFUL_API_KEY)
-  throw new Error("❌ Missing PRINTFUL_API_KEY");
+if (!process.env.PRINTFUL_API_KEY) throw new Error("❌ Missing PRINTFUL_API_KEY");
 
 const stripe = new Stripe(STRIPE_KEY, { apiVersion: "2023-10-16" });
 
@@ -34,20 +32,16 @@ async function run() {
   let errored = 0;
 
   for (const product of products) {
-    const variantId = product.metadata?.sync_variant_id;
-    const syncProductId = product.metadata?.printful_sync_product_id;
+    const syncVariantId = product.metadata?.sync_variant_id;
 
-    if (!variantId || !syncProductId) {
-      console.warn(`⚠️ Skipping product with missing metadata: ${product.name}`);
+    if (!syncVariantId) {
+      console.warn(`⚠️ Skipping product with missing sync_variant_id: ${product.name}`);
       skipped++;
       continue;
     }
 
     try {
-      const { title, metadata } = await getPrintfulVariantDetails(
-        syncProductId,
-        variantId
-      );
+      const { title, metadata } = await getPrintfulVariantDetails(syncVariantId);
 
       const needsUpdate =
         product.name !== title ||

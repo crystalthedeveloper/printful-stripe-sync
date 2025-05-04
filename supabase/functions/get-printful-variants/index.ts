@@ -1,4 +1,4 @@
-// get-printful-variants.ts (Stripe + Printful Only - Updated for sync_variant_id and fallback image)
+// get-printful-variants.ts (Stripe + Printful Only - using sync_variant_id)
 
 const PRINTFUL_API_KEY = Deno.env.get("PRINTFUL_API_KEY");
 
@@ -13,7 +13,7 @@ interface PrintfulVariantFile {
 }
 
 interface PrintfulSyncVariant {
-  id: number; // This is the correct Printful store variant ID (sync_variant_id)
+  id: number;
   name: string;
   size: string;
   color: string;
@@ -29,6 +29,10 @@ interface PrintfulSyncVariant {
 interface PrintfulProductResponse {
   result: {
     sync_variants: PrintfulSyncVariant[];
+    sync_product?: {
+      name?: string;
+      thumbnail_url?: string;
+    };
   };
 }
 
@@ -67,19 +71,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     const product: PrintfulProductResponse = await res.json();
-    const syncVariants: PrintfulSyncVariant[] = product.result?.sync_variants ?? [];
+    const syncVariants = product.result?.sync_variants ?? [];
+    const productName = product.result?.sync_product?.name || "";
+    const fallbackImage = product.result?.sync_product?.thumbnail_url || "";
 
     const variants = syncVariants.map((v) => {
       const previewFile = v.files?.find((f) => f.type === "preview");
-      const previewImage = previewFile?.preview_url || v.product?.image || "";
-
-      const baseCode = v.name.split("/")[0].trim(); // e.g., "04H"
-      const stripeProductName = `${baseCode} - ${v.name}`; // e.g., "04H - 04H / S"
+      const previewImage = previewFile?.preview_url || v.product?.image || fallbackImage;
+      const baseCode = v.name.split("/")[0].trim();
+      const stripeName = `${baseCode} - ${v.name}`;
 
       return {
         sync_variant_id: v.id,
         variant_name: v.name,
-        stripe_product_name: stripeProductName,
+        stripe_product_name: stripeName,
+        printful_product_name: productName,
         size: v.size,
         color: v.color,
         available: v.available !== false,
