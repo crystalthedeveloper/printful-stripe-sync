@@ -1,9 +1,9 @@
 /**
  * remove-stripe-duplicates.js
- * 
- * Removes Stripe product duplicates based on printful_variant_id.
- * Falls back to name match if metadata is missing.
- * Handles both TEST and LIVE modes.
+ *
+ * Deletes duplicate Stripe products by printful_variant_id or fallback name.
+ * Handles both test and live environments.
+ * Deletes all prices before deleting a product.
  */
 
 import dotenv from "dotenv";
@@ -13,6 +13,7 @@ dotenv.config();
 
 const DRY_RUN = process.env.DRY_RUN === "true";
 const DELETE_ORPHANS = process.env.DELETE_ORPHANS === "true";
+
 const MODES = {
   test: process.env.STRIPE_SECRET_TEST,
   live: process.env.STRIPE_SECRET_KEY,
@@ -22,6 +23,27 @@ if (!MODES.test || !MODES.live) {
   throw new Error("❌ Missing test or live Stripe secret key.");
 }
 
+async function deleteProductAndPrices(stripe, productId) {
+  try {
+    const prices = await stripe.prices.list({ product: productId, limit: 100 });
+    for (const price of prices.data) {
+      if (!DRY_RUN) {
+        await stripe.prices.update(price.id, { active: false });
+      }
+      console.log(`🔻 Deactivated price: ${price.id}`);
+    }
+
+    if (!DRY_RUN) {
+      await stripe.products.del(productId);
+    }
+
+    return true;
+  } catch (err) {
+    console.error(`❌ Error deleting product ${productId}: ${err.message}`);
+    return false;
+  }
+}
+
 async function removeDuplicates(mode) {
   const stripe = new Stripe(MODES[mode], { apiVersion: "2023-10-16" });
   console.log(`\n🧹 Starting cleanup in ${mode.toUpperCase()} mode...`);
@@ -29,45 +51,48 @@ async function removeDuplicates(mode) {
   const products = await getAllStripeProducts(stripe);
   console.log(`📦 Total products fetched: ${products.length}`);
 
-  const byName = new Map();
+  const byKey = new Map();
   let deleted = 0, kept = 0, skipped = 0, orphaned = 0, errors = 0;
 
   for (const p of products) {
-    if (!byName.has(p.name)) {
-      byName.set(p.name, [p]);
+    const variantId = p.metadata?.printful_variant_id;
+    const key = variantId || p.name;
+
+    if (!variantId) {
+      console.warn(`⚠️ Orphaned product (no variant ID): ${p.name} (${p.id})`);
+      if (DELETE_ORPHANS && !DRY_RUN) {
+        const success = await deleteProductAndPrices(stripe, p.id);
+        if (success) orphaned++;
+        else errors++;
+      }
+      skipped++;
+    }
+
+    if (!byKey.has(key)) {
+      byKey.set(key, [p]);
     } else {
-      byName.get(p.name).push(p);
+      byKey.get(key).push(p);
     }
   }
 
-  console.log(`🔎 Checking ${byName.size} unique product names...`);
+  console.log(`🔎 Checking ${byKey.size} keys (variantId or fallback name)...`);
 
-  for (const [name, group] of byName.entries()) {
+  for (const [key, group] of byKey.entries()) {
     if (group.length <= 1) continue;
 
-    // Prefer product with valid variant_id
-    const valid = group.find(p => !!p.metadata?.printful_variant_id);
-    const [keeper, ...rest] = valid
-      ? [valid, ...group.filter(p => p.id !== valid.id)]
-      : group.sort((a, b) => b.created - a.created);
-
-    console.log(`\n📛 Duplicate group for "${name}":`);
+    console.log(`\n🔥 Duplicate group for key: ${key}`);
     group.forEach(p => console.log(`   - ${p.name} (${p.id})`));
 
-    console.log(`✅ Keeping: ${keeper.name} (${keeper.id})`);
+    const sorted = group.sort((a, b) => b.created - a.created);
+    const [newest, ...duplicates] = sorted;
+
+    console.log(`✅ Keeping: ${newest.name} (${newest.id})`);
     kept++;
 
-    for (const d of rest) {
-      try {
-        if (!DRY_RUN) {
-          await stripe.products.del(d.id);
-        }
-        console.log(`❌ Deleted duplicate: ${d.name} (${d.id})`);
-        deleted++;
-      } catch (err) {
-        console.error(`❌ Error deleting ${d.id}: ${err.message}`);
-        errors++;
-      }
+    for (const dupe of duplicates) {
+      const success = await deleteProductAndPrices(stripe, dupe.id);
+      if (success) deleted++;
+      else errors++;
     }
   }
 
