@@ -13,7 +13,7 @@ interface PrintfulVariantFile {
 }
 
 interface PrintfulSyncVariant {
-  id: number; // sync_variant_id
+  id: number;
   name: string;
   size: string;
   color: string;
@@ -68,12 +68,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     const data: PrintfulProductResponse = await res.json();
+
     const variants = (data.result?.sync_variants || []).map((v) => {
       const previewFile = v.files?.find((f) => f.type === "preview");
       const previewImage = previewFile?.preview_url || v.product?.image || "";
 
       const baseCode = v.name.split("/")[0].trim(); // e.g., "04H"
-      const stripeProductName = `${baseCode} - ${v.name.trim()}`; // e.g., "04H - 04H / S"
+      const stripeProductName = `${baseCode} - ${v.name.trim()}`;
 
       return {
         sync_variant_id: v.id,
@@ -84,6 +85,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
         available: v.available !== false,
         retail_price: v.retail_price,
         image_url: previewImage,
+
+        // No legacy fields returned — clean data only
       };
     });
 

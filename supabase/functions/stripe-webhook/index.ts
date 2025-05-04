@@ -1,5 +1,5 @@
 // Supabase Edge Function: stripe-webhook.ts
-// Verifies Stripe webhook and creates Printful order using sync_variant_id
+// Verifies Stripe webhook and creates Printful order using sync_variant_id only
 
 import { serve } from "https://deno.land/std@0.192.0/http/server.ts";
 
@@ -94,17 +94,17 @@ serve(async (req: Request): Promise<Response> => {
     const validItems = await Promise.all(
       lineItems.data.map(async (item) => {
         const syncVariantId = item.price?.metadata?.sync_variant_id;
-        if (!syncVariantId) {
-          console.warn(`⚠️ Missing sync_variant_id: ${item.price.id}`);
+        if (!syncVariantId || isNaN(Number(syncVariantId))) {
+          console.warn(`⚠️ Invalid or missing sync_variant_id: ${item.price.id}`);
           return null;
         }
 
-        const check = await fetch(`https://api.printful.com/store/variants/${syncVariantId}`, {
+        const res = await fetch(`https://api.printful.com/store/variants/${syncVariantId}`, {
           headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
         });
 
-        if (!check.ok) {
-          console.warn(`⚠️ Invalid Printful sync_variant_id: ${syncVariantId}`);
+        if (!res.ok) {
+          console.warn(`⚠️ Printful sync_variant_id not found: ${syncVariantId}`);
           return null;
         }
 
@@ -116,7 +116,7 @@ serve(async (req: Request): Promise<Response> => {
     ).then(items => items.filter(Boolean));
 
     if (!validItems.length) {
-      console.warn("⚠️ No valid items. Skipping Printful order.");
+      console.warn("⚠️ No valid Printful items found.");
       return new Response("No valid Printful items", { status: 200, headers: corsHeaders });
     }
 
@@ -133,7 +133,7 @@ serve(async (req: Request): Promise<Response> => {
         email: session.customer_details?.email || "no-reply@example.com",
       },
       items: validItems,
-      confirm: false,
+      confirm: mode === "live", // 🔁 Live orders get confirmed automatically
     };
 
     const pfRes = await fetch("https://api.printful.com/orders", {
@@ -147,17 +147,17 @@ serve(async (req: Request): Promise<Response> => {
 
     const pfData = await pfRes.json();
     if (!pfRes.ok) {
-      console.error("❌ Printful order failed:", pfData);
+      console.error("❌ Printful order creation failed:", pfData);
       return new Response(JSON.stringify(pfData), { status: 500, headers: corsHeaders });
     }
 
-    console.log("✅ Draft order created in Printful:", pfData.id || pfData);
+    console.log("✅ Printful order created:", pfData.id || pfData);
   }
 
   return new Response(JSON.stringify({ received: true }), { status: 200, headers: corsHeaders });
 });
 
-// Helper: Verify Stripe Webhook Signature
+// Stripe signature verification helpers
 function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let result = 0;
