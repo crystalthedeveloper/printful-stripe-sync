@@ -1,12 +1,12 @@
+
 /**
  * utils.js
- * 
+ *
  * Shared helper functions used across Printful→Stripe sync scripts.
- * Includes:
- * - Getting all Stripe products
- * - Fetching Printful products/variants
- * - Creating or updating Stripe products
- * - Ensuring Stripe prices exist
+ * Ensures:
+ * - Accurate Printful product/variant mapping
+ * - Stripe product creation/update with correct metadata
+ * - Stripe price creation/update with correct variant IDs
  */
 
 import fetch from "node-fetch";
@@ -51,7 +51,7 @@ export async function getPrintfulProducts() {
       const metadata = {
         printful_product_name: productName,
         printful_variant_name: v.name,
-        printful_variant_id: String(v.variant_id),
+        printful_variant_id: String(v.id),
         printful_sync_product_id: String(p.id),
         image_url: image,
       };
@@ -69,13 +69,14 @@ export async function getPrintfulVariantDetails(productId, variantId) {
   });
   const json = await res.json();
   const product = json.result;
-  const variant = product.sync_variants.find(v => v.variant_id == variantId);
+  const variant = product.sync_variants.find(v => v.id == variantId);
+  if (!variant) throw new Error(`Variant ID ${variantId} not found for product ${productId}`);
 
   const title = `${product.sync_product.name.trim()} - ${variant.name.trim()}`;
   const metadata = {
     printful_product_name: product.sync_product.name,
     printful_variant_name: variant.name,
-    printful_variant_id: String(variantId),
+    printful_variant_id: String(variant.id),
     image_url: product.sync_product.thumbnail_url,
     printful_sync_product_id: String(productId),
   };
