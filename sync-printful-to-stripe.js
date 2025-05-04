@@ -24,7 +24,7 @@ async function sync() {
 
   console.log(`📦 Found ${productList.length} synced Printful products`);
 
-  let added = 0, updated = 0, archived = 0, errored = 0;
+  let added = 0, updated = 0, errored = 0;
 
   for (const product of productList) {
     const syncProductId = product.id;
@@ -56,6 +56,7 @@ async function sync() {
         printful_variant_name: variantName,
         printful_variant_id: String(variantId),
         image_url: image,
+        printful_sync_product_id: String(syncProductId),
       };
 
       try {
@@ -66,11 +67,7 @@ async function sync() {
         let keeperId;
 
         if (existing.data.length > 0) {
-          const sorted = existing.data.sort((a, b) => new Date(b.created) - new Date(a.created));
-          const [keeper, ...dupes] = sorted;
-          keeperId = keeper.id;
-
-          // ✅ Update the keeper
+          keeperId = existing.data[0].id;
           if (!DRY_RUN) {
             await stripe.products.update(keeperId, {
               name: title,
@@ -79,30 +76,20 @@ async function sync() {
             });
           }
           updated++;
-          console.log(`🔁 Updated keeper: ${title}`);
-
-          // 🗑️ Archive the duplicates
-          for (const d of dupes) {
-            if (!DRY_RUN) {
-              await stripe.products.update(d.id, { active: false });
-            }
-            console.log(`🗑️ Archived duplicate: ${d.name} (${d.id})`);
-            archived++;
-          }
-
+          console.log(`🔁 Updated: ${title}`);
         } else {
-          // ➕ Create new product
-          const created = await stripe.products.create({
-            name: title,
-            metadata,
-            active: true,
-          });
-          keeperId = created.id;
+          if (!DRY_RUN) {
+            const created = await stripe.products.create({
+              name: title,
+              metadata,
+              active: true,
+            });
+            keeperId = created.id;
+          }
           added++;
           console.log(`➕ Created: ${title}`);
         }
 
-        // 💰 Ensure price exists
         const prices = await stripe.prices.list({ product: keeperId, limit: 100 });
         const hasPrice = prices.data.some(p =>
           p.metadata?.printful_store_variant_id === String(variantId)
@@ -128,7 +115,7 @@ async function sync() {
     }
   }
 
-  console.log(`✅ SYNC COMPLETE → Added: ${added}, Updated: ${updated}, Archived: ${archived}, Errors: ${errored}`);
+  console.log(`✅ SYNC COMPLETE → Added: ${added}, Updated: ${updated}, Errors: ${errored}`);
 }
 
 sync();

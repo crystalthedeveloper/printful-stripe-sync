@@ -53,7 +53,7 @@ async function cleanDuplicates(mode) {
     }
   }
 
-  let archived = 0, kept = 0, errors = 0;
+  let deleted = 0, kept = 0, errors = 0;
 
   for (const [variantId, group] of byVariant.entries()) {
     if (group.length <= 1) continue;
@@ -68,18 +68,18 @@ async function cleanDuplicates(mode) {
     for (const dupe of duplicates) {
       try {
         if (!DRY_RUN) {
-          await stripe.products.update(dupe.id, { active: false });
+          await stripe.products.del(dupe.id);
         }
-        console.log(`🗑️ Archived duplicate: ${dupe.name} (${dupe.id})`);
-        archived++;
+        console.log(`❌ Deleted duplicate: ${dupe.name} (${dupe.id})`);
+        deleted++;
       } catch (err) {
-        console.error(`❌ Error archiving ${dupe.id}: ${err.message}`);
+        console.error(`❌ Error deleting ${dupe.id}: ${err.message}`);
         errors++;
       }
     }
   }
 
-  console.log(`🎉 ${mode.toUpperCase()} CLEANUP → Kept: ${kept}, Archived: ${archived}, Errors: ${errors}`);
+  console.log(`🧹 ${mode.toUpperCase()} CLEANUP → Kept: ${kept}, Deleted: ${deleted}, Errors: ${errors}`);
 }
 
 async function run() {
