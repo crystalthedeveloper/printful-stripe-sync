@@ -36,7 +36,7 @@ jobs:
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
         run: node sync-printful-products.js live
 
-      # UPDATE Stripe Products Metadata for TEST
+      # UPDATE Stripe Product Metadata for TEST
       - name: 🛠️ Update Stripe Product Metadata (TEST)
         env:
           DRY_RUN: false
@@ -44,7 +44,7 @@ jobs:
           STRIPE_SECRET_TEST: ${{ secrets.STRIPE_SECRET_TEST }}
         run: node update-stripe-products.js test
 
-      # UPDATE Stripe Products Metadata for LIVE
+      # UPDATE Stripe Product Metadata for LIVE
       - name: 🛠️ Update Stripe Product Metadata (LIVE)
         env:
           DRY_RUN: false
@@ -52,17 +52,17 @@ jobs:
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
         run: node update-stripe-products.js live
 
-      # CLEANUP printful_variant_id for TEST
-      - name: 🧹 Remove printful_variant_id from Stripe (TEST)
+      # CLEANUP unused Printful metadata from Stripe (TEST)
+      - name: 🧹 Remove unused Printful metadata (TEST)
         env:
           STRIPE_SECRET_TEST: ${{ secrets.STRIPE_SECRET_TEST }}
-        run: node remove-printful-variant-id.js test
+        run: node remove-printful-unused-fields.js test
 
-      # CLEANUP printful_variant_id for LIVE
-      - name: 🧹 Remove printful_variant_id from Stripe (LIVE)
+      # CLEANUP unused Printful metadata from Stripe (LIVE)
+      - name: 🧹 Remove unused Printful metadata (LIVE)
         env:
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
-        run: node remove-printful-variant-id.js live
+        run: node remove-printful-unused-fields.js live
 
       - name: 🔍 Show logs on failure
         if: failure()
