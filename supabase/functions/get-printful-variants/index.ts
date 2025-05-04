@@ -1,4 +1,4 @@
-// get-printful-variants.ts (Stripe + Printful Only, no `any`)
+// get-printful-variants.ts (Stripe + Printful Only - Updated for sync_variant_id and fallback image)
 
 const PRINTFUL_API_KEY = Deno.env.get("PRINTFUL_API_KEY");
 
@@ -13,13 +13,17 @@ interface PrintfulVariantFile {
 }
 
 interface PrintfulSyncVariant {
-  id: number;
+  id: number; // This is the correct Printful store variant ID (sync_variant_id)
   name: string;
   size: string;
   color: string;
   available: boolean;
   retail_price: string;
   files?: PrintfulVariantFile[];
+  product?: {
+    name?: string;
+    image?: string;
+  };
 }
 
 interface PrintfulProductResponse {
@@ -67,18 +71,20 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     const variants = syncVariants.map((v) => {
       const previewFile = v.files?.find((f) => f.type === "preview");
-      const baseCode = v.name.split("/")[0].trim();            // e.g. "02P"
-      const fullStripeName = `${baseCode} - ${v.name}`;         // "02P - 02P / S"
+      const previewImage = previewFile?.preview_url || v.product?.image || "";
+
+      const baseCode = v.name.split("/")[0].trim(); // Extract short code, e.g., "02P"
+      const stripeName = `${baseCode} - ${v.name}`; // "02P - 02P / M"
 
       return {
-        printful_store_variant_id: v.id,
+        sync_variant_id: v.id, // ✅ Use this name for webhook compatibility
         variant_name: v.name,
-        stripe_product_name: fullStripeName,
+        stripe_product_name: stripeName,
         size: v.size,
         color: v.color,
         available: v.available !== false,
         retail_price: v.retail_price,
-        image_url: previewFile?.preview_url || "",
+        image_url: previewImage,
       };
     });
 

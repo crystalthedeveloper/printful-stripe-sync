@@ -1,6 +1,6 @@
 /**
  * sync-printful-products.js
- * 
+ *
  * Purpose: Sync Printful products and their variants into Stripe.
  * It creates or updates products in Stripe, ensuring that:
  * - No duplicates are created.
@@ -35,14 +35,21 @@ async function run() {
 
   for (const { title, metadata, price } of products) {
     try {
-      if (!metadata?.printful_variant_id || !price) {
+      if (!metadata?.sync_variant_id || !price) {
         console.warn(`⚠️ Skipping incomplete product: ${title}`);
         skipped++;
         continue;
       }
 
       const { id, created } = await getOrCreateProduct(stripe, title, metadata, DRY_RUN);
-      await ensurePriceExists(stripe, id, price, metadata.printful_variant_id, metadata.image_url, DRY_RUN);
+      await ensurePriceExists(
+        stripe,
+        id,
+        price,
+        metadata.sync_variant_id,
+        metadata.image_url,
+        DRY_RUN
+      );
 
       created ? added++ : updated++;
       console.log(`${created ? "➕ Created" : "🔁 Updated"}: ${title}`);

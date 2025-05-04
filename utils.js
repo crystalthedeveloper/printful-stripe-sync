@@ -1,4 +1,3 @@
-
 /**
  * utils.js
  *
@@ -33,6 +32,7 @@ export async function getPrintfulProducts() {
   const listRes = await fetch("https://api.printful.com/sync/products", {
     headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
   });
+
   const listJson = await listRes.json();
   const products = [];
 
@@ -51,7 +51,7 @@ export async function getPrintfulProducts() {
       const metadata = {
         printful_product_name: productName,
         printful_variant_name: v.name,
-        printful_variant_id: String(v.id),
+        sync_variant_id: String(v.id), // ✅ using correct store variant ID
         printful_sync_product_id: String(p.id),
         image_url: image,
       };
@@ -67,16 +67,18 @@ export async function getPrintfulVariantDetails(productId, variantId) {
   const res = await fetch(`https://api.printful.com/sync/products/${productId}`, {
     headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
   });
+
   const json = await res.json();
   const product = json.result;
   const variant = product.sync_variants.find(v => v.id == variantId);
+
   if (!variant) throw new Error(`Variant ID ${variantId} not found for product ${productId}`);
 
   const title = `${product.sync_product.name.trim()} - ${variant.name.trim()}`;
   const metadata = {
     printful_product_name: product.sync_product.name,
     printful_variant_name: variant.name,
-    printful_variant_id: String(variant.id),
+    sync_variant_id: String(variant.id), // ✅ updated key
     image_url: product.sync_product.thumbnail_url,
     printful_sync_product_id: String(productId),
   };
@@ -86,7 +88,7 @@ export async function getPrintfulVariantDetails(productId, variantId) {
 
 export async function getOrCreateProduct(stripe, title, metadata, DRY_RUN) {
   const byMetadata = await stripe.products.search({
-    query: `metadata['printful_variant_id']:'${metadata.printful_variant_id}'`,
+    query: `metadata['sync_variant_id']:'${metadata.sync_variant_id}'`,
   });
 
   if (byMetadata.data.length > 0) {
@@ -115,7 +117,7 @@ export async function getOrCreateProduct(stripe, title, metadata, DRY_RUN) {
 export async function ensurePriceExists(stripe, productId, price, variantId, image, DRY_RUN) {
   const prices = await stripe.prices.list({ product: productId, limit: 100 });
   const expectedMetadata = {
-    printful_store_variant_id: String(variantId),
+    printful_store_variant_id: String(variantId), // for order fulfillment
     image_url: image,
   };
 
