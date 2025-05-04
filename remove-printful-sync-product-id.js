@@ -1,18 +1,28 @@
+/**
+ * remove-printful-unused-fields.js
+ *
+ * Removes unused metadata keys (`printful_variant_id` and `printful_sync_product_id`)
+ * from all Stripe products.
+ *
+ * Usage:
+ *    node remove-printful-unused-fields.js test
+ *    node remove-printful-unused-fields.js live
+ */
+
 import dotenv from "dotenv";
 import Stripe from "stripe";
 
 dotenv.config();
 
 const MODE = process.argv[2] || process.env.MODE || "test";
-const STRIPE_KEY =
-  MODE === "live" ? process.env.STRIPE_SECRET_KEY : process.env.STRIPE_SECRET_TEST;
+const STRIPE_KEY = MODE === "live" ? process.env.STRIPE_SECRET_KEY : process.env.STRIPE_SECRET_TEST;
 
 if (!STRIPE_KEY) throw new Error(`❌ Missing Stripe key for mode: ${MODE.toUpperCase()}`);
 
 const stripe = new Stripe(STRIPE_KEY, { apiVersion: "2023-10-16" });
 
 async function run() {
-  console.log(`🚨 Cleaning up printful_variant_id from Stripe products (${MODE.toUpperCase()} mode)`);
+  console.log(`🚨 Cleaning up unused Printful metadata in ${MODE.toUpperCase()} mode`);
 
   const products = [];
   let hasMore = true;
@@ -27,7 +37,7 @@ async function run() {
     }
   }
 
-  if (!products.length) {
+  if (products.length === 0) {
     console.log("⚠️ No products found.");
     return;
   }
@@ -35,10 +45,15 @@ async function run() {
   let updated = 0;
   for (const product of products) {
     const metadata = { ...product.metadata };
-    if ("printful_variant_id" in metadata) {
+    const hadVariant = "printful_variant_id" in metadata;
+    const hadSyncProduct = "printful_sync_product_id" in metadata;
+
+    if (hadVariant || hadSyncProduct) {
       delete metadata.printful_variant_id;
+      delete metadata.printful_sync_product_id;
+
       await stripe.products.update(product.id, { metadata });
-      console.log(`✅ Removed from: ${product.name} (${product.id})`);
+      console.log(`✅ Cleaned: ${product.name} (${product.id})`);
       updated++;
     }
   }

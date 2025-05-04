@@ -52,6 +52,18 @@ jobs:
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
         run: node update-stripe-products.js live
 
+      # CLEANUP printful_variant_id for TEST
+      - name: 🧹 Remove printful_variant_id from Stripe (TEST)
+        env:
+          STRIPE_SECRET_TEST: ${{ secrets.STRIPE_SECRET_TEST }}
+        run: node remove-printful-variant-id.js test
+
+      # CLEANUP printful_variant_id for LIVE
+      - name: 🧹 Remove printful_variant_id from Stripe (LIVE)
+        env:
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+        run: node remove-printful-variant-id.js live
+
       - name: 🔍 Show logs on failure
         if: failure()
         run: echo "❌ Workflow failed. Check logs above for details."

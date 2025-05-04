@@ -1,4 +1,4 @@
-// get-printful-variants.ts (Stripe + Printful Only - using sync_variant_id)
+// get-printful-variants.ts — Fetches all variants from a Printful product by product_id
 
 const PRINTFUL_API_KEY = Deno.env.get("PRINTFUL_API_KEY");
 
@@ -13,7 +13,7 @@ interface PrintfulVariantFile {
 }
 
 interface PrintfulSyncVariant {
-  id: number;
+  id: number; // sync_variant_id
   name: string;
   size: string;
   color: string;
@@ -29,10 +29,6 @@ interface PrintfulSyncVariant {
 interface PrintfulProductResponse {
   result: {
     sync_variants: PrintfulSyncVariant[];
-    sync_product?: {
-      name?: string;
-      thumbnail_url?: string;
-    };
   };
 }
 
@@ -64,28 +60,25 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     if (!res.ok) {
       const error = await res.json();
+      console.error("❌ Printful API error:", error);
       return new Response(JSON.stringify({ error: error.message || "Printful API error" }), {
         status: res.status,
         headers: corsHeaders,
       });
     }
 
-    const product: PrintfulProductResponse = await res.json();
-    const syncVariants = product.result?.sync_variants ?? [];
-    const productName = product.result?.sync_product?.name || "";
-    const fallbackImage = product.result?.sync_product?.thumbnail_url || "";
-
-    const variants = syncVariants.map((v) => {
+    const data: PrintfulProductResponse = await res.json();
+    const variants = (data.result?.sync_variants || []).map((v) => {
       const previewFile = v.files?.find((f) => f.type === "preview");
-      const previewImage = previewFile?.preview_url || v.product?.image || fallbackImage;
-      const baseCode = v.name.split("/")[0].trim();
-      const stripeName = `${baseCode} - ${v.name}`;
+      const previewImage = previewFile?.preview_url || v.product?.image || "";
+
+      const baseCode = v.name.split("/")[0].trim(); // e.g., "04H"
+      const stripeProductName = `${baseCode} - ${v.name.trim()}`; // e.g., "04H - 04H / S"
 
       return {
         sync_variant_id: v.id,
         variant_name: v.name,
-        stripe_product_name: stripeName,
-        printful_product_name: productName,
+        stripe_product_name: stripeProductName,
         size: v.size,
         color: v.color,
         available: v.available !== false,
@@ -101,6 +94,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unexpected error";
+    console.error("❌ Exception in get-printful-variants.ts:", message);
     return new Response(JSON.stringify({ error: message }), {
       status: 500,
       headers: corsHeaders,

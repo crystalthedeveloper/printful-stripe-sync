@@ -2,7 +2,7 @@
  * update-stripe-products.js
  *
  * Purpose: Refresh all existing Stripe products with latest metadata from Printful.
- * - Only updates products that already exist and include sync_variant_id + printful_sync_product_id.
+ * - Only updates products that already exist and include sync_variant_id.
  * - Ensures Stripe name + metadata stay in sync with Printful.
  */
 
@@ -20,8 +20,7 @@ const STRIPE_KEY =
     : process.env.STRIPE_SECRET_TEST;
 
 if (!STRIPE_KEY) throw new Error(`❌ Missing Stripe key for mode: ${MODE}`);
-if (!process.env.PRINTFUL_API_KEY)
-  throw new Error("❌ Missing PRINTFUL_API_KEY");
+if (!process.env.PRINTFUL_API_KEY) throw new Error("❌ Missing PRINTFUL_API_KEY");
 
 const stripe = new Stripe(STRIPE_KEY, { apiVersion: "2023-10-16" });
 
@@ -35,19 +34,15 @@ async function run() {
 
   for (const product of products) {
     const variantId = product.metadata?.sync_variant_id;
-    const syncProductId = product.metadata?.printful_sync_product_id;
 
-    if (!variantId || !syncProductId) {
-      console.warn(`⚠️ Skipping product with missing metadata: ${product.name}`);
+    if (!variantId) {
+      console.warn(`⚠️ Skipping product with missing sync_variant_id: ${product.name}`);
       skipped++;
       continue;
     }
 
     try {
-      const { title, metadata } = await getPrintfulVariantDetails(
-        syncProductId,
-        variantId
-      );
+      const { title, metadata } = await getPrintfulVariantDetails(variantId);
 
       const needsUpdate =
         product.name !== title ||

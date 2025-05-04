@@ -40,9 +40,9 @@ async function run() {
 
   for (const { title, metadata, price } of products) {
     try {
-      const { sync_variant_id, printful_sync_product_id } = metadata;
+      const { sync_variant_id } = metadata;
 
-      if (!sync_variant_id || !printful_sync_product_id || !price) {
+      if (!sync_variant_id || !price) {
         console.warn(`⚠️ Skipping incomplete product: ${title}`);
         skipped++;
         continue;
