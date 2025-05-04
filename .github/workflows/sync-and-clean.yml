@@ -60,6 +60,7 @@ jobs:
       - name: Remove duplicates (test + live)
         env:
           DRY_RUN: false
+          DELETE_ORPHANS: true
           STRIPE_SECRET_TEST: ${{ secrets.STRIPE_SECRET_TEST }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
         run: node remove-stripe-duplicates.js
