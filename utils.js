@@ -122,7 +122,7 @@ export async function getOrCreateProduct(stripe, title, metadata, DRY_RUN) {
   return { id: created.id, created: true };
 }
 
-// Ensure Stripe price exists and is up-to-date
+// Ensure Stripe price exists and is up-to-date and only one is active
 export async function ensurePriceExists(stripe, productId, price, syncVariantId, image, DRY_RUN) {
   const prices = await stripe.prices.list({ product: productId, limit: 100 });
 
@@ -131,20 +131,36 @@ export async function ensurePriceExists(stripe, productId, price, syncVariantId,
     image_url: image
   };
 
-  const match = prices.data.find(p =>
+  const existing = prices.data.find(p =>
     p.metadata?.sync_variant_id === expectedMetadata.sync_variant_id
   );
 
-  if (!match && !DRY_RUN) {
-    await stripe.prices.create({
-      product: productId,
-      unit_amount: Math.round(parseFloat(price) * 100),
-      currency: "cad",
-      metadata: expectedMetadata,
-    });
-    console.log(`➕ Created price for ${syncVariantId}`);
-  } else if (match && !DRY_RUN) {
-    await stripe.prices.update(match.id, { metadata: expectedMetadata });
-    console.log(`🔁 Updated price metadata: ${match.id}`);
+  if (existing) {
+    if (!DRY_RUN) {
+      await stripe.prices.update(existing.id, {
+        metadata: expectedMetadata,
+        active: true
+      });
+    }
+    console.log(`🔁 Updated existing price: ${existing.id}`);
+  } else {
+    if (!DRY_RUN) {
+      const created = await stripe.prices.create({
+        product: productId,
+        unit_amount: Math.round(parseFloat(price) * 100),
+        currency: "cad",
+        metadata: expectedMetadata,
+      });
+      console.log(`➕ Created new price: ${created.id}`);
+    }
+  }
+
+  for (const p of prices.data) {
+    if (p.metadata?.sync_variant_id !== expectedMetadata.sync_variant_id && p.active) {
+      if (!DRY_RUN) {
+        await stripe.prices.update(p.id, { active: false });
+      }
+      console.log(`🗑️ Deactivated extra price: ${p.id}`);
+    }
   }
 }
