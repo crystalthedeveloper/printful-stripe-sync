@@ -1,8 +1,8 @@
 /**
  * cleanup-stripe-prices.js
  *
- * Deactivates all but one price per Stripe product to ensure there's only one active price.
- * Stripe does not allow full deletion of prices, but inactive prices are ignored in checkout.
+ * Deactivates (archives) all but one price per Stripe product.
+ * Stripe does not support hard deletion of prices via API.
  */
 
 import dotenv from "dotenv";
@@ -19,7 +19,7 @@ if (!STRIPE_KEY) throw new Error(`❌ Missing Stripe key for mode: ${MODE.toUppe
 const stripe = new Stripe(STRIPE_KEY, { apiVersion: "2023-10-16" });
 
 async function run() {
-  console.log(`🧹 Starting price cleanup in ${MODE.toUpperCase()} mode...`);
+  console.log(`🧹 Starting aggressive price cleanup in ${MODE.toUpperCase()} mode...`);
 
   const products = [];
   let hasMore = true;
@@ -39,11 +39,8 @@ async function run() {
   for (const product of products) {
     const prices = await stripe.prices.list({ product: product.id, limit: 100 });
 
-    if (prices.data.length <= 1) {
-      continue; // nothing to clean
-    }
+    if (prices.data.length <= 1) continue;
 
-    // Find the keeper price: match by sync_variant_id OR just keep the first one
     const productSyncId = product.metadata?.sync_variant_id;
     const keeper = prices.data.find(p => p.metadata?.sync_variant_id === productSyncId) || prices.data[0];
 
@@ -51,9 +48,9 @@ async function run() {
       if (price.id !== keeper.id && price.active) {
         try {
           await stripe.prices.update(price.id, { active: false });
-          console.log(`🗑️ Deactivated price: ${price.id} for ${product.name}`);
+          console.log(`🗑️ Archived price: ${price.id} (${product.name})`);
         } catch (err) {
-          console.error(`❌ Failed to deactivate price ${price.id}: ${err.message}`);
+          console.error(`❌ Failed to archive price ${price.id}: ${err.message}`);
         }
       }
     }
@@ -61,7 +58,7 @@ async function run() {
     cleaned++;
   }
 
-  console.log(`✅ Price cleanup complete → ${cleaned} product(s) processed in ${MODE.toUpperCase()} mode.`);
+  console.log(`✅ Cleanup done: ${cleaned} product(s) processed in ${MODE.toUpperCase()} mode.`);
 }
 
 run().catch(err => {
