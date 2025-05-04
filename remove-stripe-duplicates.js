@@ -7,7 +7,7 @@
  * Logic:
  * - Loads all Stripe products from each mode
  * - Maps by `printful_variant_id`
- * - Keeps most recent product (by created date)
+ * - Keeps most recent product (based on UNIX timestamp `created`)
  * - Permanently deletes the older duplicates
  */
 
@@ -28,37 +28,37 @@ if (!MODES.test || !MODES.live) {
 
 async function removeDuplicates(mode) {
   const stripe = new Stripe(MODES[mode], { apiVersion: "2023-10-16" });
-  console.log(`🧹 Removing duplicates in ${mode.toUpperCase()}...`);
+  console.log(`\n🧹 Starting cleanup in ${mode.toUpperCase()} mode...`);
 
   const products = await getAllStripeProducts(stripe);
   const byVariant = new Map();
 
-  for (const p of products) {
-    const id = p.metadata?.printful_variant_id;
-    if (!id) continue;
+  for (const product of products) {
+    const variantId = product.metadata?.printful_variant_id;
+    if (!variantId) continue;
 
-    if (!byVariant.has(id)) {
-      byVariant.set(id, [p]);
+    if (!byVariant.has(variantId)) {
+      byVariant.set(variantId, [product]);
     } else {
-      byVariant.get(id).push(p);
+      byVariant.get(variantId).push(product);
     }
   }
 
-  let deleted = 0,
-    kept = 0,
-    errors = 0;
+  let deleted = 0;
+  let kept = 0;
+  let errors = 0;
 
   for (const [variantId, list] of byVariant.entries()) {
     if (list.length <= 1) continue;
 
-    const [newest, ...rest] = list.sort(
-      (a, b) => new Date(b.created) - new Date(a.created)
-    );
+    // Sort by Stripe product `created` (a UNIX timestamp)
+    const sorted = list.sort((a, b) => b.created - a.created);
+    const [newest, ...duplicates] = sorted;
 
+    console.log(`\n✅ Keeping: ${newest.name} (${newest.id}) for variant ${variantId}`);
     kept++;
-    console.log(`✅ Keeping: ${newest.name} (${newest.id})`);
 
-    for (const dupe of rest) {
+    for (const dupe of duplicates) {
       try {
         if (!DRY_RUN) {
           await stripe.products.del(dupe.id);
@@ -72,9 +72,7 @@ async function removeDuplicates(mode) {
     }
   }
 
-  console.log(
-    `🧽 ${mode.toUpperCase()} CLEANUP → Kept: ${kept}, Deleted: ${deleted}, Errors: ${errors}`
-  );
+  console.log(`\n🧽 ${mode.toUpperCase()} CLEANUP SUMMARY → Kept: ${kept}, Deleted: ${deleted}, Errors: ${errors}`);
 }
 
 async function run() {
