@@ -1,10 +1,10 @@
 /**
  * update-stripe-metadata.js
  *
- * Cleans and updates Stripe product metadata:
- * - Overwrites legacy keys: `printful_variant_id`, `printful_sync_product_id`
- * - Adds `sku` from sync_variant_id if missing
- * - Leaves all other keys intact
+ * Cleans up metadata by:
+ * - Removing `printful_variant_id` and `printful_sync_product_id`
+ * - Moving their values to `legacy_` versions (if not already there)
+ * - Keeps only `sync_variant_id` and `sku`
  */
 
 import dotenv from "dotenv";
@@ -21,7 +21,7 @@ if (!STRIPE_KEY) throw new Error(`❌ Missing Stripe key for mode: ${MODE.toUppe
 const stripe = new Stripe(STRIPE_KEY, { apiVersion: "2023-10-16" });
 
 async function run() {
-  console.log(`🚨 Overwriting outdated metadata in ${MODE.toUpperCase()} mode`);
+  console.log(`🧹 Final cleanup of duplicated metadata in ${MODE.toUpperCase()} mode`);
 
   const products = [];
   let hasMore = true;
@@ -43,22 +43,31 @@ async function run() {
 
     let changed = false;
 
-    // Rename legacy keys instead of deleting
-    if ("printful_variant_id" in metadata) {
+    // Move old values to legacy fields if not already moved
+    if ("printful_variant_id" in metadata && !metadata.legacy_printful_variant_id) {
       metadata.legacy_printful_variant_id = metadata.printful_variant_id;
+      changed = true;
+    }
+
+    if ("printful_sync_product_id" in metadata && !metadata.legacy_printful_sync_product_id) {
+      metadata.legacy_printful_sync_product_id = metadata.printful_sync_product_id;
+      changed = true;
+    }
+
+    // Remove all redundant keys
+    if ("printful_variant_id" in metadata) {
       delete metadata.printful_variant_id;
       changed = true;
     }
 
     if ("printful_sync_product_id" in metadata) {
-      metadata.legacy_printful_sync_product_id = metadata.printful_sync_product_id;
       delete metadata.printful_sync_product_id;
       changed = true;
     }
 
-    // Add fallback SKU if missing
-    if (!metadata.sku && (original.sync_variant_id || original.printful_variant_id)) {
-      metadata.sku = original.sku || original.sync_variant_id || original.printful_variant_id;
+    // Ensure SKU is set
+    if (!metadata.sku && metadata.sync_variant_id) {
+      metadata.sku = metadata.sync_variant_id;
       changed = true;
     }
 
@@ -66,14 +75,14 @@ async function run() {
 
     try {
       await stripe.products.update(product.id, { metadata });
-      console.log(`✅ Updated: ${product.name} (${product.id})`);
+      console.log(`✅ Cleaned ${product.name} (${product.id})`);
       updated++;
     } catch (err) {
       console.error(`❌ Failed to update ${product.name}: ${err.message}`);
     }
   }
 
-  console.log(`🎉 Done. ${updated} product(s) updated in ${MODE.toUpperCase()} mode.`);
+  console.log(`🎉 Done. ${updated} product(s) cleaned in ${MODE.toUpperCase()} mode.`);
 }
 
 run().catch((err) => {
