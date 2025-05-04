@@ -73,13 +73,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const previewFile = v.files?.find((f) => f.type === "preview");
       const previewImage = previewFile?.preview_url || v.product?.image || "";
 
-      const baseCode = v.name.split("/")[0].trim(); // Extract short code, e.g., "02P"
-      const stripeName = `${baseCode} - ${v.name}`; // "02P - 02P / M"
+      const baseCode = v.name.split("/")[0].trim(); // e.g., "04H"
+      const stripeProductName = `${baseCode} - ${v.name}`; // e.g., "04H - 04H / S"
 
       return {
-        sync_variant_id: v.id, // ✅ Use this name for webhook compatibility
+        sync_variant_id: v.id,
         variant_name: v.name,
-        stripe_product_name: stripeName,
+        stripe_product_name: stripeProductName,
         size: v.size,
         color: v.color,
         available: v.available !== false,

@@ -98,8 +98,8 @@ serve(async (req: Request): Promise<Response> => {
           return null;
         }
 
-        // Confirm variant exists using correct endpoint
-        const res = await fetch(`https://api.printful.com/sync/variant/${syncVariantId}`, {
+        // Confirm variant exists in Printful using the store/variants endpoint
+        const res = await fetch(`https://api.printful.com/store/variants/${syncVariantId}`, {
           headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
         });
 

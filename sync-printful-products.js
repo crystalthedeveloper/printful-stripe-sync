@@ -20,18 +20,27 @@ dotenv.config();
 
 const DRY_RUN = process.env.DRY_RUN === "true";
 const MODE = process.argv[2] || process.env.MODE || "test";
-const STRIPE_KEY = MODE === "live" ? process.env.STRIPE_SECRET_KEY : process.env.STRIPE_SECRET_TEST;
+const STRIPE_KEY =
+  MODE === "live"
+    ? process.env.STRIPE_SECRET_KEY
+    : process.env.STRIPE_SECRET_TEST;
 
 if (!STRIPE_KEY) throw new Error(`❌ Missing Stripe key for mode: ${MODE}`);
-if (!process.env.PRINTFUL_API_KEY) throw new Error("❌ Missing PRINTFUL_API_KEY");
+if (!process.env.PRINTFUL_API_KEY)
+  throw new Error("❌ Missing PRINTFUL_API_KEY");
 
 const stripe = new Stripe(STRIPE_KEY, { apiVersion: "2023-10-16" });
 
 async function run() {
-  console.log(`🚀 Starting Printful → Stripe sync in ${MODE.toUpperCase()} mode`);
+  console.log(
+    `🚀 Starting Printful → Stripe sync in ${MODE.toUpperCase()} mode`
+  );
   const products = await getPrintfulProducts();
 
-  let added = 0, updated = 0, skipped = 0, errored = 0;
+  let added = 0,
+    updated = 0,
+    skipped = 0,
+    errored = 0;
 
   for (const { title, metadata, price } of products) {
     try {
@@ -41,12 +50,18 @@ async function run() {
         continue;
       }
 
-      const { id, created } = await getOrCreateProduct(stripe, title, metadata, DRY_RUN);
+      const { id, created } = await getOrCreateProduct(
+        stripe,
+        title,
+        metadata,
+        DRY_RUN
+      );
+
       await ensurePriceExists(
         stripe,
         id,
         price,
-        metadata.sync_variant_id,
+        metadata.sync_variant_id, // ✅ using correct Printful store variant ID
         metadata.image_url,
         DRY_RUN
       );
@@ -59,7 +74,9 @@ async function run() {
     }
   }
 
-  console.log(`✅ SYNC COMPLETE (${MODE.toUpperCase()}) → Added: ${added}, Updated: ${updated}, Skipped: ${skipped}, Errors: ${errored}`);
+  console.log(
+    `✅ SYNC COMPLETE (${MODE.toUpperCase()}) → Added: ${added}, Updated: ${updated}, Skipped: ${skipped}, Errors: ${errored}`
+  );
 }
 
 run();

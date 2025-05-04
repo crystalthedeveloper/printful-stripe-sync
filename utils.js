@@ -51,9 +51,11 @@ export async function getPrintfulProducts() {
       const metadata = {
         printful_product_name: productName,
         printful_variant_name: v.name,
-        sync_variant_id: String(v.id), // ✅ using correct store variant ID
+        sync_variant_id: String(v.id), // ✅ Use correct store variant ID
         printful_sync_product_id: String(p.id),
         image_url: image,
+        size: v.size,
+        color: v.color,
       };
       products.push({ title, metadata, price: v.retail_price });
     }
@@ -70,7 +72,7 @@ export async function getPrintfulVariantDetails(productId, variantId) {
 
   const json = await res.json();
   const product = json.result;
-  const variant = product.sync_variants.find(v => v.id == variantId);
+  const variant = product.sync_variants.find(v => String(v.id) === String(variantId));
 
   if (!variant) throw new Error(`Variant ID ${variantId} not found for product ${productId}`);
 
@@ -78,9 +80,11 @@ export async function getPrintfulVariantDetails(productId, variantId) {
   const metadata = {
     printful_product_name: product.sync_product.name,
     printful_variant_name: variant.name,
-    sync_variant_id: String(variant.id), // ✅ updated key
+    sync_variant_id: String(variant.id), // ✅ correct metadata key
     image_url: product.sync_product.thumbnail_url,
     printful_sync_product_id: String(productId),
+    size: variant.size,
+    color: variant.color,
   };
 
   return { title, metadata };
@@ -114,10 +118,10 @@ export async function getOrCreateProduct(stripe, title, metadata, DRY_RUN) {
   return { id: created.id, created: true };
 }
 
-export async function ensurePriceExists(stripe, productId, price, variantId, image, DRY_RUN) {
+export async function ensurePriceExists(stripe, productId, price, syncVariantId, image, DRY_RUN) {
   const prices = await stripe.prices.list({ product: productId, limit: 100 });
   const expectedMetadata = {
-    printful_store_variant_id: String(variantId), // for order fulfillment
+    printful_store_variant_id: String(syncVariantId), // for Printful fulfillment
     image_url: image,
   };
 
@@ -132,7 +136,7 @@ export async function ensurePriceExists(stripe, productId, price, variantId, ima
       currency: "cad",
       metadata: expectedMetadata,
     });
-    console.log(`➕ Created price for variant ${variantId}`);
+    console.log(`➕ Created price for variant ${syncVariantId}`);
   } else if (existing && !DRY_RUN) {
     await stripe.prices.update(existing.id, { metadata: expectedMetadata });
     console.log(`🔁 Updated metadata on existing price: ${existing.id}`);
