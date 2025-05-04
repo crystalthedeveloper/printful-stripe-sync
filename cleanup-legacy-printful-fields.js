@@ -2,7 +2,6 @@
  * cleanup-legacy-printful-fields.js
  *
  * Permanently deletes legacy Printful metadata fields from Stripe products.
- * - Removes: legacy_printful_variant_id, legacy_printful_sync_product_id, printful_variant_id
  */
 
 import dotenv from "dotenv";
@@ -43,21 +42,19 @@ async function run() {
   let cleaned = 0;
 
   for (const product of products) {
-    const original = product.metadata || {};
-    const updated = { ...original };
+    const updatedMetadata = {};
+    let shouldUpdate = false;
 
-    let removedAny = false;
-
-    for (const field of FIELDS_TO_REMOVE) {
-      if (field in updated) {
-        delete updated[field];
-        removedAny = true;
+    for (const key of FIELDS_TO_REMOVE) {
+      if (product.metadata?.[key]) {
+        updatedMetadata[key] = null;
+        shouldUpdate = true;
       }
     }
 
-    if (removedAny) {
+    if (shouldUpdate) {
       try {
-        await stripe.products.update(product.id, { metadata: updated });
+        await stripe.products.update(product.id, { metadata: updatedMetadata });
         console.log(`✅ Cleaned: ${product.name} (${product.id})`);
         cleaned++;
       } catch (err) {
