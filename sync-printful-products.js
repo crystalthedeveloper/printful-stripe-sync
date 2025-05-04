@@ -2,17 +2,8 @@
  * sync-printful-products.js
  *
  * Purpose: Sync Printful products and their variants into Stripe.
- * - No duplicates are created.
- * - Product metadata includes full Printful info.
- * - Prices are created or updated with proper metadata.
- */
-
-/**
- * sync-printful-products.js
- *
- * Purpose: Sync Printful products and their variants into Stripe.
  * - Avoids duplicates by matching sync_variant_id.
- * - Ensures metadata is consistent and legacy fields are overwritten.
+ * - Ensures metadata is clean (legacy keys are never added).
  * - Creates or updates prices with proper metadata.
  */
 
@@ -61,7 +52,7 @@ async function run() {
         continue;
       }
 
-      // 🧼 Construct cleaned metadata with overwrites for legacy fields
+      // ✅ Clean metadata — no legacy keys added
       const stripeMetadata = {
         sync_variant_id,
         sku,
@@ -69,12 +60,7 @@ async function run() {
         printful_product_name,
         size,
         color,
-        image_url,
-
-        // Overwrite legacy keys to prevent duplicates or confusion
-        printful_variant_id: "migrated_to_sync_variant_id",
-        legacy_printful_variant_id: "migrated_to_sync_variant_id",
-        legacy_printful_sync_product_id: "migrated_to_printful_product_name"
+        image_url
       };
 
       const { id, created } = await getOrCreateProduct(stripe, title, stripeMetadata, DRY_RUN);

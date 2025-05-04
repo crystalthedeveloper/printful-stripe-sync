@@ -41,7 +41,7 @@ async function run() {
     try {
       const { title, metadata } = await getPrintfulVariantDetails(variantId);
 
-      // Final metadata with legacy fields removed
+      // ✅ Construct new clean metadata (only desired fields)
       const cleanedMetadata = {
         sync_variant_id: metadata.sync_variant_id,
         sku: metadata.sku,
@@ -52,15 +52,15 @@ async function run() {
         image_url: metadata.image_url
       };
 
-      // Remove legacy fields from existing metadata if present
-      const existing = { ...product.metadata };
-      delete existing.printful_variant_id;
-      delete existing.legacy_printful_variant_id;
-      delete existing.legacy_printful_sync_product_id;
+      // Compare using a filtered version of current metadata (without legacy fields)
+      const currentCleaned = { ...product.metadata };
+      delete currentCleaned.printful_variant_id;
+      delete currentCleaned.legacy_printful_variant_id;
+      delete currentCleaned.legacy_printful_sync_product_id;
 
       const needsUpdate =
         product.name !== title ||
-        JSON.stringify(existing) !== JSON.stringify(cleanedMetadata);
+        JSON.stringify(currentCleaned) !== JSON.stringify(cleanedMetadata);
 
       if (needsUpdate && !DRY_RUN) {
         await stripe.products.update(product.id, {

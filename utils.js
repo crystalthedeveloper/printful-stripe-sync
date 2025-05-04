@@ -2,8 +2,8 @@
  * utils.js
  *
  * Shared helper functions used across Printful→Stripe sync scripts.
- * - Uses sync_variant_id (Printful store variant ID) only.
- * - Ensures accurate metadata and sync with Stripe products/prices.
+ * - Only uses `sync_variant_id` for consistency.
+ * - No legacy metadata keys are included.
  */
 
 import fetch from "node-fetch";
@@ -55,12 +55,7 @@ export async function getPrintfulProducts() {
         sku: variant.sku,
         image_url: image,
         size: variant.size,
-        color: variant.color,
-
-        // Legacy overwrite (helpful if still showing up in Stripe dashboard)
-        printful_variant_id: "migrated_to_sync_variant_id",
-        legacy_printful_variant_id: "migrated_to_sync_variant_id",
-        legacy_printful_sync_product_id: "migrated_to_printful_product_name"
+        color: variant.color
       };
 
       products.push({ title, metadata, price: variant.retail_price });
@@ -90,12 +85,7 @@ export async function getPrintfulVariantDetails(syncVariantId) {
     sku: variant.sku,
     image_url: variant.product.image,
     size: variant.size,
-    color: variant.color,
-
-    // Legacy fields overwritten
-    printful_variant_id: "migrated_to_sync_variant_id",
-    legacy_printful_variant_id: "migrated_to_sync_variant_id",
-    legacy_printful_sync_product_id: "migrated_to_printful_product_name"
+    color: variant.color
   };
 
   return { title, metadata };
