@@ -1,9 +1,9 @@
 /**
  * remove-stripe-duplicates.js
  *
- * Deletes duplicate Stripe products by printful_variant_id or fallback name.
+ * Deletes duplicate Stripe products by printful_variant_id or fallback normalized name.
  * Handles both test and live environments.
- * Deletes all prices before deleting a product.
+ * Deactivates prices before deleting a product.
  */
 
 import dotenv from "dotenv";
@@ -37,6 +37,7 @@ async function deleteProductAndPrices(stripe, productId) {
       await stripe.products.del(productId);
     }
 
+    console.log(`❌ Deleted product: ${productId}`);
     return true;
   } catch (err) {
     console.error(`❌ Error deleting product ${productId}: ${err.message}`);
@@ -56,7 +57,7 @@ async function removeDuplicates(mode) {
 
   for (const p of products) {
     const variantId = p.metadata?.printful_variant_id;
-    const key = variantId || p.name;
+    const key = variantId || p.name.trim().toLowerCase(); // normalize name fallback
 
     if (!variantId) {
       console.warn(`⚠️ Orphaned product (no variant ID): ${p.name} (${p.id})`);
@@ -75,6 +76,11 @@ async function removeDuplicates(mode) {
     }
   }
 
+  console.log(`\n📌 Key map breakdown:`);
+  for (const [key, group] of byKey.entries()) {
+    console.log(`🧵 ${key}: ${group.length} product(s)`);
+  }
+
   console.log(`🔎 Checking ${byKey.size} keys (variantId or fallback name)...`);
 
   for (const [key, group] of byKey.entries()) {
@@ -83,7 +89,7 @@ async function removeDuplicates(mode) {
     console.log(`\n🔥 Duplicate group for key: ${key}`);
     group.forEach(p => console.log(`   - ${p.name} (${p.id})`));
 
-    const sorted = group.sort((a, b) => b.created - a.created);
+    const sorted = group.sort((a, b) => b.created - a.created).reverse();
     const [newest, ...duplicates] = sorted;
 
     console.log(`✅ Keeping: ${newest.name} (${newest.id})`);
