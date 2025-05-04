@@ -1,9 +1,14 @@
 /**
  * update-stripe-products.js
  *
- * Purpose: Refresh all Stripe product metadata, name, and image based on Printful data.
- * Use Case: Run daily to stay in sync with Printful even if products weren’t recently added.
- * Mode: "test" or "live" passed via CLI or env.
+ * Purpose: Update existing Stripe products with the latest metadata, image, and name from Printful.
+ * Mode: Pass "test" or "live" via CLI args or environment variable.
+ *
+ * Logic:
+ * - Loops through Stripe products
+ * - Checks for `printful_variant_id` in metadata
+ * - Re-fetches product/variant details from Printful
+ * - Updates Stripe product metadata or name if changed
  */
 
 import dotenv from "dotenv";
@@ -13,22 +18,29 @@ dotenv.config();
 
 const DRY_RUN = process.env.DRY_RUN === "true";
 const MODE = process.argv[2] || process.env.MODE || "test";
-const STRIPE_KEY = MODE === "live" ? process.env.STRIPE_SECRET_KEY : process.env.STRIPE_SECRET_TEST;
 
-if (!STRIPE_KEY || !process.env.PRINTFUL_API_KEY) {
-  throw new Error("❌ Missing Stripe or Printful credentials.");
-}
+const STRIPE_KEY =
+  MODE === "live"
+    ? process.env.STRIPE_SECRET_KEY
+    : process.env.STRIPE_SECRET_TEST;
+
+if (!STRIPE_KEY) throw new Error(`❌ Missing Stripe key for mode: ${MODE}`);
+if (!process.env.PRINTFUL_API_KEY)
+  throw new Error("❌ Missing PRINTFUL_API_KEY");
 
 const stripe = new Stripe(STRIPE_KEY, { apiVersion: "2023-10-16" });
 
 async function run() {
+  console.log(`🔄 Updating Stripe product metadata (${MODE.toUpperCase()})`);
   const products = await getAllStripeProducts(stripe);
 
-  let updated = 0, skipped = 0, errors = 0;
+  let updated = 0,
+    skipped = 0,
+    errored = 0;
 
-  for (const p of products) {
-    const variantId = p.metadata?.printful_variant_id;
-    const syncProductId = p.metadata?.printful_sync_product_id;
+  for (const product of products) {
+    const variantId = product.metadata?.printful_variant_id;
+    const syncProductId = product.metadata?.printful_sync_product_id;
 
     if (!variantId || !syncProductId) {
       skipped++;
@@ -36,19 +48,38 @@ async function run() {
     }
 
     try {
-      const { title, metadata } = await getPrintfulVariantDetails(syncProductId, variantId);
-      if (!DRY_RUN) {
-        await stripe.products.update(p.id, { name: title, metadata });
+      const { title, metadata } = await getPrintfulVariantDetails(
+        syncProductId,
+        variantId
+      );
+
+      const needsUpdate =
+        product.name !== title ||
+        JSON.stringify(product.metadata) !== JSON.stringify(metadata);
+
+      if (needsUpdate) {
+        if (!DRY_RUN) {
+          await stripe.products.update(product.id, {
+            name: title,
+            metadata,
+            active: true,
+          });
+        }
+
+        console.log(`🔁 Updated: ${title}`);
+        updated++;
+      } else {
+        skipped++;
       }
-      console.log(`🔄 Updated metadata: ${title}`);
-      updated++;
     } catch (err) {
-      console.error(`❌ Failed to update ${p.id}: ${err.message}`);
-      errors++;
+      console.error(`❌ Error updating ${product.name}: ${err.message}`);
+      errored++;
     }
   }
 
-  console.log(`✅ UPDATE COMPLETE (${MODE.toUpperCase()}) → Updated: ${updated}, Skipped: ${skipped}, Errors: ${errors}`);
+  console.log(
+    `✅ UPDATE COMPLETE (${MODE.toUpperCase()}) → Updated: ${updated}, Skipped: ${skipped}, Errors: ${errored}`
+  );
 }
 
 run();

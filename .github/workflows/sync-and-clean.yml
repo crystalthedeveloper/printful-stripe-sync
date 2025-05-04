@@ -25,7 +25,8 @@ jobs:
         env:
           DRY_RUN: false
           PRINTFUL_API_KEY: ${{ secrets.PRINTFUL_API_KEY }}
-          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_TEST }}
+          STRIPE_SECRET_TEST: ${{ secrets.STRIPE_SECRET_TEST }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }} # optional fallback
         run: node sync-printful-products.js test
 
       # SYNC Printful → Stripe for LIVE
@@ -33,6 +34,7 @@ jobs:
         env:
           DRY_RUN: false
           PRINTFUL_API_KEY: ${{ secrets.PRINTFUL_API_KEY }}
+          STRIPE_SECRET_TEST: ${{ secrets.STRIPE_SECRET_TEST }} # optional fallback
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
         run: node sync-printful-products.js live
 
@@ -41,7 +43,8 @@ jobs:
         env:
           DRY_RUN: false
           PRINTFUL_API_KEY: ${{ secrets.PRINTFUL_API_KEY }}
-          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_TEST }}
+          STRIPE_SECRET_TEST: ${{ secrets.STRIPE_SECRET_TEST }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
         run: node update-stripe-products.js test
 
       # UPDATE Stripe Products Metadata for LIVE
@@ -49,6 +52,7 @@ jobs:
         env:
           DRY_RUN: false
           PRINTFUL_API_KEY: ${{ secrets.PRINTFUL_API_KEY }}
+          STRIPE_SECRET_TEST: ${{ secrets.STRIPE_SECRET_TEST }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
         run: node update-stripe-products.js live
 
