@@ -11,6 +11,7 @@
  * - Fetching all Stripe products
  * - Fetching full Printful product + variant metadata
  * - Getting or creating Stripe product (with fallback name match)
+ * - protected against Duplicate products, Prices missing metadata
  * - Ensuring Stripe price exists for a variant
  */
 
@@ -151,23 +152,30 @@ export async function getOrCreateProduct(stripe, title, metadata, DRY_RUN) {
 }
 
 /**
- * Creates a Stripe price if it doesn't already exist for the variant.
+ * Ensures a Stripe price exists with the correct variant metadata.
  */
 export async function ensurePriceExists(stripe, productId, price, variantId, image, DRY_RUN) {
   const prices = await stripe.prices.list({ product: productId, limit: 100 });
-  const exists = prices.data.some(p =>
-    p.metadata?.printful_store_variant_id === String(variantId)
+
+  const expectedMetadata = {
+    printful_store_variant_id: String(variantId),
+    image_url: image,
+  };
+
+  const existing = prices.data.find(p =>
+    p.metadata?.printful_store_variant_id === expectedMetadata.printful_store_variant_id
   );
 
-  if (!exists && !DRY_RUN) {
+  if (!existing && !DRY_RUN) {
     await stripe.prices.create({
       product: productId,
       unit_amount: Math.round(parseFloat(price) * 100),
       currency: "cad",
-      metadata: {
-        printful_store_variant_id: String(variantId),
-        image_url: image,
-      },
+      metadata: expectedMetadata,
     });
+    console.log(`➕ Created price for variant ${variantId}`);
+  } else if (existing && !DRY_RUN) {
+    await stripe.prices.update(existing.id, { metadata: expectedMetadata });
+    console.log(`🔁 Updated metadata on existing price: ${existing.id}`);
   }
 }
