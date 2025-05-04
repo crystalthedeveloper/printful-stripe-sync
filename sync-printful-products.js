@@ -2,10 +2,10 @@
  * sync-printful-products.js
  *
  * Purpose: Sync Printful products and their variants into Stripe.
- * Ensures:
- * - No duplicate products or prices.
- * - Stripe products/metadata stay in sync with Printful.
- * - Each price is tagged with sync_variant_id for fulfillment.
+ * It creates or updates products in Stripe, ensuring that:
+ * - No duplicates are created.
+ * - Product metadata is always up-to-date.
+ * - Prices are created or updated with proper metadata.
  */
 
 import dotenv from "dotenv";
@@ -20,19 +20,17 @@ dotenv.config();
 
 const DRY_RUN = process.env.DRY_RUN === "true";
 const MODE = process.argv[2] || process.env.MODE || "test";
-const STRIPE_KEY =
-  MODE === "live"
-    ? process.env.STRIPE_SECRET_KEY
-    : process.env.STRIPE_SECRET_TEST;
+const STRIPE_KEY = MODE === "live"
+  ? process.env.STRIPE_SECRET_KEY
+  : process.env.STRIPE_SECRET_TEST;
 
 if (!STRIPE_KEY) throw new Error(`❌ Missing Stripe key for mode: ${MODE}`);
-if (!process.env.PRINTFUL_API_KEY)
-  throw new Error("❌ Missing PRINTFUL_API_KEY");
+if (!process.env.PRINTFUL_API_KEY) throw new Error("❌ Missing PRINTFUL_API_KEY");
 
 const stripe = new Stripe(STRIPE_KEY, { apiVersion: "2023-10-16" });
 
 async function run() {
-  console.log(`🚀 Starting Printful → Stripe sync in ${MODE.toUpperCase()} mode`);
+  console.log(`🚀 Starting Printful → Stripe sync (${MODE.toUpperCase()} mode)`);
   const products = await getPrintfulProducts();
 
   let added = 0;
@@ -42,24 +40,21 @@ async function run() {
 
   for (const { title, metadata, price } of products) {
     try {
-      if (!metadata?.sync_variant_id || !price) {
+      const { sync_variant_id, printful_sync_product_id } = metadata;
+
+      if (!sync_variant_id || !printful_sync_product_id || !price) {
         console.warn(`⚠️ Skipping incomplete product: ${title}`);
         skipped++;
         continue;
       }
 
-      const { id, created } = await getOrCreateProduct(
-        stripe,
-        title,
-        metadata,
-        DRY_RUN
-      );
+      const { id, created } = await getOrCreateProduct(stripe, title, metadata, DRY_RUN);
 
       await ensurePriceExists(
         stripe,
         id,
         price,
-        metadata.sync_variant_id, // ✅ Used by webhook and metadata
+        sync_variant_id,
         metadata.image_url,
         DRY_RUN
       );
@@ -67,7 +62,7 @@ async function run() {
       created ? added++ : updated++;
       console.log(`${created ? "➕ Created" : "🔁 Updated"}: ${title}`);
     } catch (err) {
-      console.error(`❌ Error for ${title}: ${err.message}`);
+      console.error(`❌ Error syncing ${title}: ${err.message}`);
       errored++;
     }
   }
@@ -77,4 +72,6 @@ async function run() {
   );
 }
 
-run();
+run().catch((err) => {
+  console.error("❌ Sync process failed:", err.message);
+});

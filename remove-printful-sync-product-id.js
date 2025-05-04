@@ -12,7 +12,7 @@ if (!STRIPE_KEY) throw new Error(`❌ Missing Stripe key for mode: ${MODE.toUppe
 const stripe = new Stripe(STRIPE_KEY, { apiVersion: "2023-10-16" });
 
 async function run() {
-  console.log(`🚨 Cleaning up printful_sync_product_id from Stripe products (${MODE.toUpperCase()} mode)`);
+  console.log(`🚨 Cleaning up printful_variant_id from Stripe products (${MODE.toUpperCase()} mode)`);
 
   const products = [];
   let hasMore = true;
@@ -35,8 +35,8 @@ async function run() {
   let updated = 0;
   for (const product of products) {
     const metadata = { ...product.metadata };
-    if ("printful_sync_product_id" in metadata) {
-      delete metadata.printful_sync_product_id;
+    if ("printful_variant_id" in metadata) {
+      delete metadata.printful_variant_id;
       await stripe.products.update(product.id, { metadata });
       console.log(`✅ Removed from: ${product.name} (${product.id})`);
       updated++;
