@@ -1,0 +1,37 @@
+name: 🔁 Cleanup Legacy Printful Fields
+
+on:
+  schedule:
+    - cron: '0 6 * * *'  # Daily at 6 AM UTC
+  workflow_dispatch:
+
+jobs:
+  cleanup-legacy-fields:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm install
+
+      # CLEANUP legacy fields for TEST
+      - name: 🧹 Cleanup Legacy Metadata (TEST)
+        env:
+          STRIPE_SECRET_TEST: ${{ secrets.STRIPE_SECRET_TEST }}
+        run: node cleanup-legacy-printful-fields.js test
+
+      # CLEANUP legacy fields for LIVE
+      - name: 🧹 Cleanup Legacy Metadata (LIVE)
+        env:
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+        run: node cleanup-legacy-printful-fields.js live
+
+      - name: 🔍 Show logs on failure
+        if: failure()
+        run: echo "❌ Workflow failed. Check logs above for details."
