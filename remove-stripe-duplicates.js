@@ -7,8 +7,8 @@
  * Logic:
  * - Loads all Stripe products from each mode
  * - Maps by `printful_variant_id`
- * - Keeps most recent product (based on UNIX timestamp `created`)
- * - Permanently deletes the older duplicates
+ * - Keeps most recent product (by `created`)
+ * - Permanently deletes older duplicates
  */
 
 import dotenv from "dotenv";
@@ -31,31 +31,39 @@ async function removeDuplicates(mode) {
   console.log(`\n🧹 Starting cleanup in ${mode.toUpperCase()} mode...`);
 
   const products = await getAllStripeProducts(stripe);
+  console.log(`📦 Total products fetched: ${products.length}`);
+
   const byVariant = new Map();
 
-  for (const product of products) {
-    const variantId = product.metadata?.printful_variant_id;
-    if (!variantId) continue;
+  for (const p of products) {
+    const variantId = p.metadata?.printful_variant_id;
+    if (!variantId) {
+      console.warn(`⚠️ Skipping product with no variant ID: ${p.name} (${p.id})`);
+      continue;
+    }
 
     if (!byVariant.has(variantId)) {
-      byVariant.set(variantId, [product]);
+      byVariant.set(variantId, [p]);
     } else {
-      byVariant.get(variantId).push(product);
+      byVariant.get(variantId).push(p);
     }
   }
+
+  console.log(`🔎 Checking for duplicates among ${byVariant.size} unique variant IDs...`);
 
   let deleted = 0;
   let kept = 0;
   let errors = 0;
 
-  for (const [variantId, list] of byVariant.entries()) {
-    if (list.length <= 1) continue;
+  for (const [variantId, group] of byVariant.entries()) {
+    if (group.length <= 1) continue;
 
-    // Sort by Stripe product `created` (a UNIX timestamp)
-    const sorted = list.sort((a, b) => b.created - a.created);
+    console.log(`\n📛 Duplicate group for variant ${variantId}: ${group.length} items`);
+
+    const sorted = group.sort((a, b) => b.created - a.created); // newest first
     const [newest, ...duplicates] = sorted;
 
-    console.log(`\n✅ Keeping: ${newest.name} (${newest.id}) for variant ${variantId}`);
+    console.log(`✅ Keeping: ${newest.name} (${newest.id})`);
     kept++;
 
     for (const dupe of duplicates) {
