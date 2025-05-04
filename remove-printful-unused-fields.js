@@ -3,10 +3,6 @@
  *
  * Removes unused metadata keys (`printful_variant_id` and `printful_sync_product_id`)
  * from all Stripe products.
- *
- * Usage:
- *    node remove-printful-unused-fields.js test
- *    node remove-printful-unused-fields.js live
  */
 
 import dotenv from "dotenv";
@@ -15,7 +11,9 @@ import Stripe from "stripe";
 dotenv.config();
 
 const MODE = process.argv[2] || process.env.MODE || "test";
-const STRIPE_KEY = MODE === "live" ? process.env.STRIPE_SECRET_KEY : process.env.STRIPE_SECRET_TEST;
+const STRIPE_KEY = MODE === "live"
+  ? process.env.STRIPE_SECRET_KEY
+  : process.env.STRIPE_SECRET_TEST;
 
 if (!STRIPE_KEY) throw new Error(`❌ Missing Stripe key for mode: ${MODE.toUpperCase()}`);
 
@@ -37,24 +35,31 @@ async function run() {
     }
   }
 
-  if (products.length === 0) {
-    console.log("⚠️ No products found.");
-    return;
-  }
-
   let updated = 0;
   for (const product of products) {
-    const metadata = { ...product.metadata };
-    const hadVariant = "printful_variant_id" in metadata;
-    const hadSyncProduct = "printful_sync_product_id" in metadata;
+    const originalMetadata = { ...product.metadata };
+    const metadata = { ...originalMetadata };
 
-    if (hadVariant || hadSyncProduct) {
+    let removed = false;
+
+    if ("printful_variant_id" in metadata) {
       delete metadata.printful_variant_id;
-      delete metadata.printful_sync_product_id;
+      removed = true;
+    }
 
-      await stripe.products.update(product.id, { metadata });
-      console.log(`✅ Cleaned: ${product.name} (${product.id})`);
-      updated++;
+    if ("printful_sync_product_id" in metadata) {
+      delete metadata.printful_sync_product_id;
+      removed = true;
+    }
+
+    if (removed) {
+      try {
+        await stripe.products.update(product.id, { metadata });
+        console.log(`✅ Cleaned ${product.name} (${product.id})`);
+        updated++;
+      } catch (err) {
+        console.error(`❌ Failed to update ${product.name}: ${err.message}`);
+      }
     }
   }
 
@@ -62,5 +67,5 @@ async function run() {
 }
 
 run().catch((err) => {
-  console.error("❌ Error:", err.message);
+  console.error("❌ Script failed:", err.message);
 });
