@@ -1,7 +1,8 @@
 /**
- * cleanup-legacy-printful-fields.js
+ * cleanup-stripe-prices.js
  *
- * Permanently deletes legacy Printful metadata fields from Stripe products.
+ * Deactivates all but one price per Stripe product to ensure there's only one active price.
+ * Stripe does not allow full deletion of prices, but inactive prices are ignored in checkout.
  */
 
 import dotenv from "dotenv";
@@ -17,14 +18,8 @@ if (!STRIPE_KEY) throw new Error(`❌ Missing Stripe key for mode: ${MODE.toUppe
 
 const stripe = new Stripe(STRIPE_KEY, { apiVersion: "2023-10-16" });
 
-const FIELDS_TO_REMOVE = [
-  "legacy_printful_variant_id",
-  "legacy_printful_sync_product_id",
-  "printful_variant_id"
-];
-
 async function run() {
-  console.log(`🧹 Starting permanent metadata cleanup in ${MODE.toUpperCase()} mode...`);
+  console.log(`🧹 Starting price cleanup in ${MODE.toUpperCase()} mode...`);
 
   const products = [];
   let hasMore = true;
@@ -42,30 +37,33 @@ async function run() {
   let cleaned = 0;
 
   for (const product of products) {
-    const updatedMetadata = {};
-    let shouldUpdate = false;
+    const prices = await stripe.prices.list({ product: product.id, limit: 100 });
 
-    for (const key of FIELDS_TO_REMOVE) {
-      if (product.metadata?.[key]) {
-        updatedMetadata[key] = null;
-        shouldUpdate = true;
+    if (prices.data.length <= 1) {
+      continue; // nothing to clean
+    }
+
+    // Find the keeper price: match by sync_variant_id OR just keep the first one
+    const productSyncId = product.metadata?.sync_variant_id;
+    const keeper = prices.data.find(p => p.metadata?.sync_variant_id === productSyncId) || prices.data[0];
+
+    for (const price of prices.data) {
+      if (price.id !== keeper.id && price.active) {
+        try {
+          await stripe.prices.update(price.id, { active: false });
+          console.log(`🗑️ Deactivated price: ${price.id} for ${product.name}`);
+        } catch (err) {
+          console.error(`❌ Failed to deactivate price ${price.id}: ${err.message}`);
+        }
       }
     }
 
-    if (shouldUpdate) {
-      try {
-        await stripe.products.update(product.id, { metadata: updatedMetadata });
-        console.log(`✅ Cleaned: ${product.name} (${product.id})`);
-        cleaned++;
-      } catch (err) {
-        console.error(`❌ Failed to clean ${product.name}: ${err.message}`);
-      }
-    }
+    cleaned++;
   }
 
-  console.log(`🎉 Cleanup complete → ${cleaned} product(s) updated in ${MODE.toUpperCase()} mode.`);
+  console.log(`✅ Price cleanup complete → ${cleaned} product(s) processed in ${MODE.toUpperCase()} mode.`);
 }
 
-run().catch((err) => {
+run().catch(err => {
   console.error("❌ Fatal error during cleanup:", err.message);
 });

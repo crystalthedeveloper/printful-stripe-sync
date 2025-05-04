@@ -1,4 +1,4 @@
-// lookup-stripe-price.ts
+// lookup-stripe-price.ts — Find a Stripe price by product_name (matches either name or printful_variant_name)
 
 import Stripe from "https://esm.sh/stripe@12.1.0?target=deno";
 
@@ -57,9 +57,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     });
   }
 
-  const stripe = new Stripe(STRIPE_SECRET, {
-    apiVersion: "2023-10-16",
-  });
+  const stripe = new Stripe(STRIPE_SECRET, { apiVersion: "2023-10-16" });
 
   try {
     const normalized = product_name.trim().toLowerCase();
@@ -67,9 +65,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const products = await stripe.products.list({ limit: 100 });
 
     const product = products.data.find((p: Stripe.Product) => {
-      const nameMatch = p.name.trim().toLowerCase() === normalized;
-      const metaMatch = (p.metadata?.printful_variant_name || "").trim().toLowerCase() === normalized;
-      return nameMatch || metaMatch;
+      const name = p.name?.trim().toLowerCase() || "";
+      const variantName = p.metadata?.printful_variant_name?.trim().toLowerCase() || "";
+      return name === normalized || variantName === normalized;
     });
 
     if (!product) {
@@ -81,7 +79,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     const prices = await stripe.prices.list({ product: product.id, limit: 1 });
 
-    if (!prices.data.length || !prices.data[0].id) {
+    if (!prices.data.length) {
       return new Response(JSON.stringify({ error: "No price found for product" }), {
         status: 404,
         headers: corsHeaders,
@@ -89,6 +87,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     const price = prices.data[0];
+
+    // Clean metadata for product
+    const cleanMetadata = { ...product.metadata };
+    delete cleanMetadata.printful_variant_id;
+    delete cleanMetadata.legacy_printful_variant_id;
+    delete cleanMetadata.legacy_printful_sync_product_id;
 
     return new Response(
       JSON.stringify({
@@ -99,7 +103,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         product: {
           id: product.id,
           name: product.name,
-          metadata: product.metadata,
+          metadata: cleanMetadata,
         },
       }),
       {

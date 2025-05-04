@@ -17,7 +17,7 @@ export function loadVariants(productId, blockEl, mode = "test") {
   const buyNowBtn = blockEl.querySelector(".buy-now");
 
   if (!variantContainer || !colorContainer || !sizeContainer || !addToCartBtn || !buyNowBtn) {
-    console.warn("⚠️ Missing variant UI containers in block:", blockEl);
+    console.warn("⚠️ Missing variant UI containers");
     if (variantContainer) {
       variantContainer.innerHTML = "<p style='color:red;'>Missing UI container elements.</p>";
     }
@@ -64,7 +64,7 @@ export function loadVariants(productId, blockEl, mode = "test") {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          product_name: variant.stripe_product_name,
+          product_name: variant.stripe_product_name.trim(),
           mode
         })
       });
@@ -154,7 +154,7 @@ export function loadVariants(productId, blockEl, mode = "test") {
     }
 
     addToCart({
-      variant_id: variant.printful_store_variant_id,
+      variant_id: variant.sync_variant_id || variant.printful_store_variant_id,
       stripe_price_id: variant.stripe_price_id,
       name: variant.variant_name || "Unnamed Product",
       image: variant.image_url || "",
