@@ -29,53 +29,37 @@ if (!process.env.PRINTFUL_API_KEY) throw new Error("❌ Missing PRINTFUL_API_KEY
 const stripe = new Stripe(STRIPE_KEY, { apiVersion: "2023-10-16" });
 
 async function run() {
-  console.log(`🚀 Starting Printful → Stripe sync (${MODE.toUpperCase()} mode)`);
+  console.log(`🚀 Syncing Printful → Stripe (${MODE.toUpperCase()} mode)`);
   const products = await getPrintfulProducts();
 
-  let added = 0;
-  let updated = 0;
-  let skipped = 0;
-  let errored = 0;
+  let added = 0, updated = 0, skipped = 0, errored = 0;
 
   for (const { title, metadata, price } of products) {
     try {
       const {
-        sync_variant_id,
-        sku,
-        printful_variant_name,
-        printful_product_name,
-        size,
-        color,
-        image_url,
+        sync_variant_id, sku, printful_variant_name,
+        printful_product_name, size, color, image_url
       } = metadata;
 
       if (!sync_variant_id || !sku || !price) {
-        console.warn(`⚠️ Skipping incomplete product: ${title}`);
+        console.warn(`⚠️ Skipping incomplete: ${title}`);
         skipped++;
         continue;
       }
 
-      // Ensure all metadata is passed cleanly
       const stripeMetadata = {
-        sync_variant_id: String(sync_variant_id),
+        sync_variant_id,
         sku,
         printful_variant_name,
         printful_product_name,
         size,
         color,
-        image_url,
+        image_url
       };
 
       const { id, created } = await getOrCreateProduct(stripe, title, stripeMetadata, DRY_RUN);
 
-      await ensurePriceExists(
-        stripe,
-        id,
-        price,
-        sync_variant_id,
-        image_url,
-        DRY_RUN
-      );
+      await ensurePriceExists(stripe, id, price, sync_variant_id, image_url, DRY_RUN);
 
       created ? added++ : updated++;
       console.log(`${created ? "➕ Created" : "🔁 Updated"}: ${title}`);
@@ -85,11 +69,7 @@ async function run() {
     }
   }
 
-  console.log(
-    `✅ SYNC COMPLETE (${MODE.toUpperCase()}) → Added: ${added}, Updated: ${updated}, Skipped: ${skipped}, Errors: ${errored}`
-  );
+  console.log(`✅ SYNC COMPLETE (${MODE.toUpperCase()}) → Added: ${added}, Updated: ${updated}, Skipped: ${skipped}, Errors: ${errored}`);
 }
 
-run().catch((err) => {
-  console.error("❌ Sync process failed:", err.message);
-});
+run().catch(err => console.error("❌ Sync process failed:", err.message));
