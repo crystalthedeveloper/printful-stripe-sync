@@ -1,4 +1,4 @@
-name: Sync Printful to Stripe & Clean Duplicates
+name: Sync Printful to Stripe & Update Metadata
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  sync-and-clean:
+  sync-and-update:
     runs-on: ubuntu-latest
 
     steps:
@@ -21,49 +21,36 @@ jobs:
         run: npm install
 
       # SYNC Printful → Stripe for TEST
-      - name: Sync Printful to Stripe (test)
+      - name: Sync Printful to Stripe (TEST)
         env:
           DRY_RUN: false
           PRINTFUL_API_KEY: ${{ secrets.PRINTFUL_API_KEY }}
           STRIPE_SECRET_TEST: ${{ secrets.STRIPE_SECRET_TEST }}
-          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }} # optional fallback
         run: node sync-printful-products.js test
 
       # SYNC Printful → Stripe for LIVE
-      - name: Sync Printful to Stripe (live)
+      - name: Sync Printful to Stripe (LIVE)
         env:
           DRY_RUN: false
           PRINTFUL_API_KEY: ${{ secrets.PRINTFUL_API_KEY }}
-          STRIPE_SECRET_TEST: ${{ secrets.STRIPE_SECRET_TEST }} # optional fallback
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
         run: node sync-printful-products.js live
 
       # UPDATE Stripe Products Metadata for TEST
-      - name: Update metadata/images (test)
+      - name: Update Stripe product metadata (TEST)
         env:
           DRY_RUN: false
           PRINTFUL_API_KEY: ${{ secrets.PRINTFUL_API_KEY }}
           STRIPE_SECRET_TEST: ${{ secrets.STRIPE_SECRET_TEST }}
-          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
         run: node update-stripe-products.js test
 
       # UPDATE Stripe Products Metadata for LIVE
-      - name: Update metadata/images (live)
+      - name: Update Stripe product metadata (LIVE)
         env:
           DRY_RUN: false
           PRINTFUL_API_KEY: ${{ secrets.PRINTFUL_API_KEY }}
-          STRIPE_SECRET_TEST: ${{ secrets.STRIPE_SECRET_TEST }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
         run: node update-stripe-products.js live
-
-      # REMOVE Duplicates from TEST + LIVE
-      - name: Remove duplicates (test + live)
-        env:
-          DRY_RUN: false
-          DELETE_ORPHANS: true
-          STRIPE_SECRET_TEST: ${{ secrets.STRIPE_SECRET_TEST }}
-          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
-        run: node remove-stripe-duplicates.js
 
       - name: Show logs on failure
         if: failure()

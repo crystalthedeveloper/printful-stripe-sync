@@ -10,7 +10,7 @@
  * Includes:
  * - Fetching all Stripe products
  * - Fetching full Printful product + variant metadata
- * - Getting or creating Stripe product
+ * - Getting or creating Stripe product (with fallback name match)
  * - Ensuring Stripe price exists for a variant
  */
 
@@ -103,30 +103,51 @@ export async function getPrintfulVariantDetails(productId, variantId) {
 
 /**
  * Gets or creates a Stripe product by variant metadata.
+ * Falls back to product name match if variant ID metadata is missing.
  */
 export async function getOrCreateProduct(stripe, title, metadata, DRY_RUN) {
-  const existing = await stripe.products.search({
+  // 1. Try by metadata match
+  const byMetadata = await stripe.products.search({
     query: `metadata['printful_variant_id']:'${metadata.printful_variant_id}'`,
   });
 
-  if (existing.data.length > 0) {
-    const id = existing.data[0].id;
+  if (byMetadata.data.length > 0) {
+    const product = byMetadata.data[0];
     if (!DRY_RUN) {
-      await stripe.products.update(id, {
+      await stripe.products.update(product.id, {
         name: title,
         metadata,
         active: true,
       });
     }
-    return { id, created: false };
-  } else {
-    const created = await stripe.products.create({
-      name: title,
-      metadata,
-      active: true,
-    });
-    return { id: created.id, created: true };
+    return { id: product.id, created: false };
   }
+
+  // 2. Fallback: Try matching by normalized name
+  const list = await stripe.products.list({ limit: 100 });
+  const matchByName = list.data.find(
+    p => p.name.trim().toLowerCase() === title.trim().toLowerCase()
+  );
+
+  if (matchByName) {
+    console.log(`🛠️ Recovered via name match: ${title}`);
+    if (!DRY_RUN) {
+      await stripe.products.update(matchByName.id, {
+        metadata,
+        active: true,
+      });
+    }
+    return { id: matchByName.id, created: false };
+  }
+
+  // 3. Create new
+  const created = await stripe.products.create({
+    name: title,
+    metadata,
+    active: true,
+  });
+
+  return { id: created.id, created: true };
 }
 
 /**
