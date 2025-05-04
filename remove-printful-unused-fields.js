@@ -20,7 +20,7 @@ if (!STRIPE_KEY) throw new Error(`❌ Missing Stripe key for mode: ${MODE.toUppe
 const stripe = new Stripe(STRIPE_KEY, { apiVersion: "2023-10-16" });
 
 async function run() {
-  console.log(`🚨 Cleaning up unused Printful metadata in ${MODE.toUpperCase()} mode`);
+  console.log(`🚨 Cleaning up Printful metadata in ${MODE.toUpperCase()} mode`);
 
   const products = [];
   let hasMore = true;
@@ -38,23 +38,19 @@ async function run() {
   let updated = 0;
   for (const product of products) {
     const originalMetadata = { ...product.metadata };
-    const metadata = { ...originalMetadata };
 
-    let removed = false;
+    // Build new metadata without the unwanted keys
+    const newMetadata = Object.fromEntries(
+      Object.entries(originalMetadata).filter(
+        ([key]) =>
+          key !== "printful_variant_id" &&
+          key !== "printful_sync_product_id"
+      )
+    );
 
-    if ("printful_variant_id" in metadata) {
-      delete metadata.printful_variant_id;
-      removed = true;
-    }
-
-    if ("printful_sync_product_id" in metadata) {
-      delete metadata.printful_sync_product_id;
-      removed = true;
-    }
-
-    if (removed) {
+    if (JSON.stringify(newMetadata) !== JSON.stringify(originalMetadata)) {
       try {
-        await stripe.products.update(product.id, { metadata });
+        await stripe.products.update(product.id, { metadata: newMetadata });
         console.log(`✅ Cleaned ${product.name} (${product.id})`);
         updated++;
       } catch (err) {
