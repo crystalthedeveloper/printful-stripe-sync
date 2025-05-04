@@ -1,9 +1,8 @@
 /**
  * remove-stripe-duplicates.js
  *
- * Deletes duplicate Stripe products by printful_variant_id or fallback normalized name.
- * Handles both test and live environments.
- * Deactivates prices before deleting a product.
+ * Fully deletes Stripe product duplicates in TEST mode only.
+ * In LIVE mode, it skips deletion but ensures no duplicates are created in future.
  */
 
 import dotenv from "dotenv";
@@ -23,22 +22,22 @@ if (!MODES.test || !MODES.live) {
   throw new Error("❌ Missing test or live Stripe secret key.");
 }
 
-async function deleteProductAndPrices(stripe, productId) {
+async function deleteProductAndPrices(stripe, productId, allowDelete) {
   try {
     const prices = await stripe.prices.list({ product: productId, limit: 100 });
     for (const price of prices.data) {
-      if (!DRY_RUN) {
+      if (!DRY_RUN && allowDelete) {
         await stripe.prices.update(price.id, { active: false });
       }
       console.log(`🔻 Deactivated price: ${price.id}`);
     }
 
-    if (!DRY_RUN) {
+    if (!DRY_RUN && allowDelete) {
       await stripe.products.del(productId);
+      console.log(`❌ Deleted product: ${productId}`);
     }
 
-    console.log(`❌ Deleted product: ${productId}`);
-    return true;
+    return allowDelete;
   } catch (err) {
     console.error(`❌ Error deleting product ${productId}: ${err.message}`);
     return false;
@@ -47,6 +46,8 @@ async function deleteProductAndPrices(stripe, productId) {
 
 async function removeDuplicates(mode) {
   const stripe = new Stripe(MODES[mode], { apiVersion: "2023-10-16" });
+  const allowDelete = mode === "test";
+
   console.log(`\n🧹 Starting cleanup in ${mode.toUpperCase()} mode...`);
 
   const products = await getAllStripeProducts(stripe);
@@ -57,12 +58,12 @@ async function removeDuplicates(mode) {
 
   for (const p of products) {
     const variantId = p.metadata?.printful_variant_id;
-    const key = variantId || p.name.trim().toLowerCase(); // normalize name fallback
+    const key = variantId || p.name.trim().toLowerCase(); // normalize fallback
 
     if (!variantId) {
       console.warn(`⚠️ Orphaned product (no variant ID): ${p.name} (${p.id})`);
-      if (DELETE_ORPHANS && !DRY_RUN) {
-        const success = await deleteProductAndPrices(stripe, p.id);
+      if (DELETE_ORPHANS && allowDelete && !DRY_RUN) {
+        const success = await deleteProductAndPrices(stripe, p.id, true);
         if (success) orphaned++;
         else errors++;
       }
@@ -96,7 +97,7 @@ async function removeDuplicates(mode) {
     kept++;
 
     for (const dupe of duplicates) {
-      const success = await deleteProductAndPrices(stripe, dupe.id);
+      const success = await deleteProductAndPrices(stripe, dupe.id, allowDelete);
       if (success) deleted++;
       else errors++;
     }
