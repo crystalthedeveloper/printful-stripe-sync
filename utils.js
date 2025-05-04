@@ -1,25 +1,16 @@
 /**
  * utils.js
- *
- * Shared helper functions for syncing Printful → Stripe.
- * Used across scripts like:
- * - sync-printful-products.js
- * - update-stripe-products.js
- * - remove-stripe-duplicates.js
- *
+ * 
+ * Shared helper functions used across Printful→Stripe sync scripts.
  * Includes:
- * - Fetching all Stripe products
- * - Fetching full Printful product + variant metadata
- * - Getting or creating Stripe product (with fallback name match)
- * - protected against Duplicate products, Prices missing metadata
- * - Ensuring Stripe price exists for a variant
+ * - Getting all Stripe products
+ * - Fetching Printful products/variants
+ * - Creating or updating Stripe products
+ * - Ensuring Stripe prices exist
  */
 
 import fetch from "node-fetch";
 
-/**
- * Fetches all Stripe products (active + archived).
- */
 export async function getAllStripeProducts(stripe) {
   const products = [];
   let hasMore = true;
@@ -37,15 +28,11 @@ export async function getAllStripeProducts(stripe) {
   return products;
 }
 
-/**
- * Fetches all synced Printful products and flattens into variant entries with metadata.
- */
 export async function getPrintfulProducts() {
   const PRINTFUL_API_KEY = process.env.PRINTFUL_API_KEY;
   const listRes = await fetch("https://api.printful.com/sync/products", {
     headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
   });
-
   const listJson = await listRes.json();
   const products = [];
 
@@ -68,7 +55,6 @@ export async function getPrintfulProducts() {
         printful_sync_product_id: String(p.id),
         image_url: image,
       };
-
       products.push({ title, metadata, price: v.retail_price });
     }
   }
@@ -76,16 +62,11 @@ export async function getPrintfulProducts() {
   return products;
 }
 
-/**
- * Gets full variant metadata from Printful using product and variant ID.
- */
 export async function getPrintfulVariantDetails(productId, variantId) {
   const PRINTFUL_API_KEY = process.env.PRINTFUL_API_KEY;
-
   const res = await fetch(`https://api.printful.com/sync/products/${productId}`, {
     headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
   });
-
   const json = await res.json();
   const product = json.result;
   const variant = product.sync_variants.find(v => v.variant_id == variantId);
@@ -102,12 +83,7 @@ export async function getPrintfulVariantDetails(productId, variantId) {
   return { title, metadata };
 }
 
-/**
- * Gets or creates a Stripe product by variant metadata.
- * Falls back to product name match if variant ID metadata is missing.
- */
 export async function getOrCreateProduct(stripe, title, metadata, DRY_RUN) {
-  // 1. Try by metadata match
   const byMetadata = await stripe.products.search({
     query: `metadata['printful_variant_id']:'${metadata.printful_variant_id}'`,
   });
@@ -115,48 +91,28 @@ export async function getOrCreateProduct(stripe, title, metadata, DRY_RUN) {
   if (byMetadata.data.length > 0) {
     const product = byMetadata.data[0];
     if (!DRY_RUN) {
-      await stripe.products.update(product.id, {
-        name: title,
-        metadata,
-        active: true,
-      });
+      await stripe.products.update(product.id, { name: title, metadata, active: true });
     }
     return { id: product.id, created: false };
   }
 
-  // 2. Fallback: Try matching by normalized name
   const list = await stripe.products.list({ limit: 100 });
-  const matchByName = list.data.find(
-    p => p.name.trim().toLowerCase() === title.trim().toLowerCase()
-  );
+  const matchByName = list.data.find(p => p.name.trim().toLowerCase() === title.trim().toLowerCase());
 
   if (matchByName) {
     console.log(`🛠️ Recovered via name match: ${title}`);
     if (!DRY_RUN) {
-      await stripe.products.update(matchByName.id, {
-        metadata,
-        active: true,
-      });
+      await stripe.products.update(matchByName.id, { metadata, active: true });
     }
     return { id: matchByName.id, created: false };
   }
 
-  // 3. Create new
-  const created = await stripe.products.create({
-    name: title,
-    metadata,
-    active: true,
-  });
-
+  const created = await stripe.products.create({ name: title, metadata, active: true });
   return { id: created.id, created: true };
 }
 
-/**
- * Ensures a Stripe price exists with the correct variant metadata.
- */
 export async function ensurePriceExists(stripe, productId, price, variantId, image, DRY_RUN) {
   const prices = await stripe.prices.list({ product: productId, limit: 100 });
-
   const expectedMetadata = {
     printful_store_variant_id: String(variantId),
     image_url: image,
