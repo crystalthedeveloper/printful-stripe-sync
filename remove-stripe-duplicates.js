@@ -29,56 +29,43 @@ async function removeDuplicates(mode) {
   const products = await getAllStripeProducts(stripe);
   console.log(`📦 Total products fetched: ${products.length}`);
 
-  const byKey = new Map(); // key = variantId or fallback name
+  const byName = new Map();
   let deleted = 0, kept = 0, skipped = 0, orphaned = 0, errors = 0;
 
   for (const p of products) {
-    const variantId = p.metadata?.printful_variant_id;
-    const key = variantId || p.name; // fallback by name
-
-    if (!variantId) {
-      console.warn(`⚠️ Orphaned product (no variant ID): ${p.name} (${p.id})`);
-      if (DELETE_ORPHANS && !DRY_RUN) {
-        try {
-          await stripe.products.del(p.id);
-          console.log(`🗑️ Deleted orphan: ${p.name} (${p.id})`);
-          orphaned++;
-        } catch (err) {
-          console.error(`❌ Failed to delete orphan ${p.id}: ${err.message}`);
-          errors++;
-        }
-      }
-      skipped++;
-    }
-
-    if (!byKey.has(key)) {
-      byKey.set(key, [p]);
+    if (!byName.has(p.name)) {
+      byName.set(p.name, [p]);
     } else {
-      byKey.get(key).push(p);
+      byName.get(p.name).push(p);
     }
   }
 
-  console.log(`🔎 Checking ${byKey.size} keys (variantId or name fallback)...`);
+  console.log(`🔎 Checking ${byName.size} unique product names...`);
 
-  for (const [key, group] of byKey.entries()) {
+  for (const [name, group] of byName.entries()) {
     if (group.length <= 1) continue;
 
-    console.log(`\n📛 Duplicate group for key: ${key}`);
+    // Prefer product with valid variant_id
+    const valid = group.find(p => !!p.metadata?.printful_variant_id);
+    const [keeper, ...rest] = valid
+      ? [valid, ...group.filter(p => p.id !== valid.id)]
+      : group.sort((a, b) => b.created - a.created);
+
+    console.log(`\n📛 Duplicate group for "${name}":`);
     group.forEach(p => console.log(`   - ${p.name} (${p.id})`));
 
-    const [newest, ...duplicates] = group.sort((a, b) => b.created - a.created);
-    console.log(`✅ Keeping: ${newest.name} (${newest.id})`);
+    console.log(`✅ Keeping: ${keeper.name} (${keeper.id})`);
     kept++;
 
-    for (const dupe of duplicates) {
+    for (const d of rest) {
       try {
         if (!DRY_RUN) {
-          await stripe.products.del(dupe.id);
+          await stripe.products.del(d.id);
         }
-        console.log(`❌ Deleted duplicate: ${dupe.name} (${dupe.id})`);
+        console.log(`❌ Deleted duplicate: ${d.name} (${d.id})`);
         deleted++;
       } catch (err) {
-        console.error(`❌ Error deleting ${dupe.id}: ${err.message}`);
+        console.error(`❌ Error deleting ${d.id}: ${err.message}`);
         errors++;
       }
     }
