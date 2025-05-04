@@ -1,5 +1,13 @@
 {
+  "name": "printful-stripe-sync",
   "type": "module",
+  "version": "1.0.0",
+  "description": "Syncs Printful products with Stripe, updates metadata, and removes duplicates.",
+  "scripts": {
+    "sync": "node sync-printful-products.js test",
+    "update": "node update-stripe-products.js test",
+    "clean": "node remove-stripe-duplicates.js"
+  },
   "dependencies": {
     "dotenv": "^16.5.0",
     "node-fetch": "^3.3.2",

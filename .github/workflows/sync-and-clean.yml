@@ -20,20 +20,45 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Run sync script (Printful → Stripe)
+      # SYNC Printful → Stripe for TEST
+      - name: Sync Printful to Stripe (test)
         env:
           DRY_RUN: false
           PRINTFUL_API_KEY: ${{ secrets.PRINTFUL_API_KEY }}
-          STRIPE_SECRET_TEST: ${{ secrets.STRIPE_SECRET_TEST }}
-          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
-        run: node sync-printful-to-stripe.js
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_TEST }}
+        run: node sync-printful-products.js test
 
-      - name: Remove duplicate products by name (TEST + LIVE)
+      # SYNC Printful → Stripe for LIVE
+      - name: Sync Printful to Stripe (live)
+        env:
+          DRY_RUN: false
+          PRINTFUL_API_KEY: ${{ secrets.PRINTFUL_API_KEY }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+        run: node sync-printful-products.js live
+
+      # UPDATE Stripe Products Metadata for TEST
+      - name: Update metadata/images (test)
+        env:
+          DRY_RUN: false
+          PRINTFUL_API_KEY: ${{ secrets.PRINTFUL_API_KEY }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_TEST }}
+        run: node update-stripe-products.js test
+
+      # UPDATE Stripe Products Metadata for LIVE
+      - name: Update metadata/images (live)
+        env:
+          DRY_RUN: false
+          PRINTFUL_API_KEY: ${{ secrets.PRINTFUL_API_KEY }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+        run: node update-stripe-products.js live
+
+      # REMOVE Duplicates from TEST + LIVE
+      - name: Remove duplicates (test + live)
         env:
           DRY_RUN: false
           STRIPE_SECRET_TEST: ${{ secrets.STRIPE_SECRET_TEST }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
-        run: node clean-broken-mappings.js
+        run: node remove-stripe-duplicates.js
 
       - name: Show logs on failure
         if: failure()
