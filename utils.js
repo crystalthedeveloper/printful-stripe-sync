@@ -8,6 +8,7 @@
 
 import fetch from "node-fetch";
 
+// Fetch all Stripe products
 export async function getAllStripeProducts(stripe) {
   const products = [];
   let hasMore = true;
@@ -25,6 +26,7 @@ export async function getAllStripeProducts(stripe) {
   return products;
 }
 
+// Fetch all Printful sync products and their variants
 export async function getPrintfulProducts() {
   const PRINTFUL_API_KEY = process.env.PRINTFUL_API_KEY;
   const listRes = await fetch("https://api.printful.com/sync/products", {
@@ -53,8 +55,14 @@ export async function getPrintfulProducts() {
         sku: variant.sku,
         image_url: image,
         size: variant.size,
-        color: variant.color
+        color: variant.color,
+
+        // Legacy overwrite (helpful if still showing up in Stripe dashboard)
+        printful_variant_id: "migrated_to_sync_variant_id",
+        legacy_printful_variant_id: "migrated_to_sync_variant_id",
+        legacy_printful_sync_product_id: "migrated_to_printful_product_name"
       };
+
       products.push({ title, metadata, price: variant.retail_price });
     }
   }
@@ -62,6 +70,7 @@ export async function getPrintfulProducts() {
   return products;
 }
 
+// Fetch a single variant’s detailed info from Printful
 export async function getPrintfulVariantDetails(syncVariantId) {
   const PRINTFUL_API_KEY = process.env.PRINTFUL_API_KEY;
   const res = await fetch(`https://api.printful.com/store/variants/${syncVariantId}`, {
@@ -81,12 +90,18 @@ export async function getPrintfulVariantDetails(syncVariantId) {
     sku: variant.sku,
     image_url: variant.product.image,
     size: variant.size,
-    color: variant.color
+    color: variant.color,
+
+    // Legacy fields overwritten
+    printful_variant_id: "migrated_to_sync_variant_id",
+    legacy_printful_variant_id: "migrated_to_sync_variant_id",
+    legacy_printful_sync_product_id: "migrated_to_printful_product_name"
   };
 
   return { title, metadata };
 }
 
+// Get or create a product in Stripe based on sync_variant_id or name
 export async function getOrCreateProduct(stripe, title, metadata, DRY_RUN) {
   const search = await stripe.products.search({
     query: `metadata['sync_variant_id']:'${metadata.sync_variant_id}'`,
@@ -117,6 +132,7 @@ export async function getOrCreateProduct(stripe, title, metadata, DRY_RUN) {
   return { id: created.id, created: true };
 }
 
+// Ensure Stripe price exists and is up-to-date
 export async function ensurePriceExists(stripe, productId, price, syncVariantId, image, DRY_RUN) {
   const prices = await stripe.prices.list({ product: productId, limit: 100 });
 

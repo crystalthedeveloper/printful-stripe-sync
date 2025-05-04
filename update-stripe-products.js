@@ -6,6 +6,14 @@
  * - Replaces legacy fields with updated keys (like sku).
  */
 
+/**
+ * update-stripe-products.js
+ *
+ * Purpose: Refresh all existing Stripe products with latest metadata from Printful.
+ * - Updates only products that include sync_variant_id.
+ * - Overwrites legacy metadata fields to avoid duplication.
+ */
+
 import dotenv from "dotenv";
 import Stripe from "stripe";
 import { getAllStripeProducts, getPrintfulVariantDetails } from "./utils.js";
@@ -24,16 +32,18 @@ if (!process.env.PRINTFUL_API_KEY) throw new Error("❌ Missing PRINTFUL_API_KEY
 const stripe = new Stripe(STRIPE_KEY, { apiVersion: "2023-10-16" });
 
 async function run() {
-  console.log(`🔄 Updating Stripe products (${MODE.toUpperCase()})`);
+  console.log(`🔄 Updating Stripe product metadata (${MODE.toUpperCase()})`);
   const products = await getAllStripeProducts(stripe);
 
-  let updated = 0, skipped = 0, errored = 0;
+  let updated = 0;
+  let skipped = 0;
+  let errored = 0;
 
   for (const product of products) {
     const variantId = product.metadata?.sync_variant_id;
 
     if (!variantId) {
-      console.warn(`⚠️ Skipping: missing sync_variant_id → ${product.name}`);
+      console.warn(`⚠️ Skipping product: missing sync_variant_id → ${product.name}`);
       skipped++;
       continue;
     }
@@ -41,22 +51,29 @@ async function run() {
     try {
       const { title, metadata } = await getPrintfulVariantDetails(variantId);
 
-      const cleanMetadata = {
+      const updatedMetadata = {
         sync_variant_id: metadata.sync_variant_id,
         sku: metadata.sku,
         printful_variant_name: metadata.printful_variant_name,
         printful_product_name: metadata.printful_product_name,
         size: metadata.size,
         color: metadata.color,
-        image_url: metadata.image_url
+        image_url: metadata.image_url,
+
+        // 🧼 Overwrite legacy fields instead of deleting to clean up duplication
+        printful_variant_id: "migrated_to_sync_variant_id",
+        legacy_printful_variant_id: "migrated_to_sync_variant_id",
+        legacy_printful_sync_product_id: "migrated_to_printful_product_name"
       };
 
-      const needsUpdate = product.name !== title || JSON.stringify(product.metadata) !== JSON.stringify(cleanMetadata);
+      const needsUpdate =
+        product.name !== title ||
+        JSON.stringify(product.metadata) !== JSON.stringify(updatedMetadata);
 
       if (needsUpdate && !DRY_RUN) {
         await stripe.products.update(product.id, {
           name: title,
-          metadata: cleanMetadata,
+          metadata: updatedMetadata,
           active: true
         });
         console.log(`🔁 Updated: ${title}`);
@@ -70,7 +87,9 @@ async function run() {
     }
   }
 
-  console.log(`✅ UPDATE COMPLETE (${MODE.toUpperCase()}) → Updated: ${updated}, Skipped: ${skipped}, Errors: ${errored}`);
+  console.log(
+    `✅ UPDATE COMPLETE (${MODE.toUpperCase()}) → Updated: ${updated}, Skipped: ${skipped}, Errors: ${errored}`
+  );
 }
 
 run().catch(err => console.error("❌ Fatal error:", err.message));

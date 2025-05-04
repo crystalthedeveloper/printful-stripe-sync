@@ -7,6 +7,15 @@
  * - Prices are created or updated with proper metadata.
  */
 
+/**
+ * sync-printful-products.js
+ *
+ * Purpose: Sync Printful products and their variants into Stripe.
+ * - Avoids duplicates by matching sync_variant_id.
+ * - Ensures metadata is consistent and legacy fields are overwritten.
+ * - Creates or updates prices with proper metadata.
+ */
+
 import dotenv from "dotenv";
 import Stripe from "stripe";
 import {
@@ -23,31 +32,20 @@ const STRIPE_KEY = MODE === "live"
   ? process.env.STRIPE_SECRET_KEY
   : process.env.STRIPE_SECRET_TEST;
 
-if (!STRIPE_KEY) throw new Error(`❌ Missing Stripe key for mode: ${MODE}`);
+if (!STRIPE_KEY) throw new Error(`❌ Missing Stripe key for mode: ${MODE.toUpperCase()}`);
 if (!process.env.PRINTFUL_API_KEY) throw new Error("❌ Missing PRINTFUL_API_KEY");
 
 const stripe = new Stripe(STRIPE_KEY, { apiVersion: "2023-10-16" });
 
 async function run() {
   console.log(`🚀 Syncing Printful → Stripe (${MODE.toUpperCase()} mode)`);
-  const products = await getPrintfulProducts();
 
+  const products = await getPrintfulProducts();
   let added = 0, updated = 0, skipped = 0, errored = 0;
 
   for (const { title, metadata, price } of products) {
     try {
       const {
-        sync_variant_id, sku, printful_variant_name,
-        printful_product_name, size, color, image_url
-      } = metadata;
-
-      if (!sync_variant_id || !sku || !price) {
-        console.warn(`⚠️ Skipping incomplete: ${title}`);
-        skipped++;
-        continue;
-      }
-
-      const stripeMetadata = {
         sync_variant_id,
         sku,
         printful_variant_name,
@@ -55,6 +53,28 @@ async function run() {
         size,
         color,
         image_url
+      } = metadata;
+
+      if (!sync_variant_id || !sku || !price) {
+        console.warn(`⚠️ Skipping incomplete product: ${title}`);
+        skipped++;
+        continue;
+      }
+
+      // 🧼 Construct cleaned metadata with overwrites for legacy fields
+      const stripeMetadata = {
+        sync_variant_id,
+        sku,
+        printful_variant_name,
+        printful_product_name,
+        size,
+        color,
+        image_url,
+
+        // Overwrite legacy keys to prevent duplicates or confusion
+        printful_variant_id: "migrated_to_sync_variant_id",
+        legacy_printful_variant_id: "migrated_to_sync_variant_id",
+        legacy_printful_sync_product_id: "migrated_to_printful_product_name"
       };
 
       const { id, created } = await getOrCreateProduct(stripe, title, stripeMetadata, DRY_RUN);
@@ -69,7 +89,9 @@ async function run() {
     }
   }
 
-  console.log(`✅ SYNC COMPLETE (${MODE.toUpperCase()}) → Added: ${added}, Updated: ${updated}, Skipped: ${skipped}, Errors: ${errored}`);
+  console.log(
+    `✅ SYNC COMPLETE (${MODE.toUpperCase()}) → Added: ${added}, Updated: ${updated}, Skipped: ${skipped}, Errors: ${errored}`
+  );
 }
 
 run().catch(err => console.error("❌ Sync process failed:", err.message));
