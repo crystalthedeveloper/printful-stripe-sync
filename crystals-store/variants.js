@@ -78,10 +78,12 @@ export function loadVariants(productId, blockEl, mode = "test") {
     // Compose product name with normalized whitespace, remove special chars, and safe fallback
     const safeProductName = `${(variant.printful_product_name || "")
       .replace(/\s+/g, " ")
+      .replace(/[-_/\\]+$/, "")
       .replace(/[()]/g, "")
       .replace(/[^\w\s-]/g, "")
       .trim()} - ${(variant.variant_name || "")
       .replace(/\s+/g, " ")
+      .replace(/[-_/\\]+$/, "")
       .replace(/[()]/g, "")
       .replace(/[^\w\s-]/g, "")
       .trim()}`;
