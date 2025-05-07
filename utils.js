@@ -2,8 +2,7 @@
  * utils.js
  *
  * Shared helper functions used across Printful→Stripe sync scripts.
- * - Only uses `sync_variant_id` for consistency.
- * - No legacy metadata keys are included.
+ * - Ensures consistent `stripe_product_name` used across all metadata and lookups.
  */
 
 import fetch from "node-fetch";
@@ -47,18 +46,20 @@ export async function getPrintfulProducts() {
     const image = data.sync_product.thumbnail_url;
 
     for (const variant of data.sync_variants || []) {
-      const title = `${productName.trim()} - ${variant.name.trim()}`;
+      const composedName = `${productName.trim()} - ${variant.name.trim()}`; // 👈 Used consistently
+
       const metadata = {
         printful_product_name: productName,
         printful_variant_name: variant.name,
+        stripe_product_name: composedName, // 👈 Added here for Stripe match
         sync_variant_id: String(variant.id),
         sku: variant.sku,
         image_url: image,
         size: variant.size,
-        color: variant.color
+        color: variant.color,
       };
 
-      products.push({ title, metadata, price: variant.retail_price });
+      products.push({ title: composedName, metadata, price: variant.retail_price });
     }
   }
 
@@ -77,21 +78,23 @@ export async function getPrintfulVariantDetails(syncVariantId) {
   const json = await res.json();
   const variant = json.result;
 
-  const title = `${variant.product.name.trim()} - ${variant.name.trim()}`;
+  const composedName = `${variant.product.name.trim()} - ${variant.name.trim()}`;
+
   const metadata = {
     printful_product_name: variant.product.name,
     printful_variant_name: variant.name,
+    stripe_product_name: composedName,
     sync_variant_id: String(variant.id),
     sku: variant.sku,
     image_url: variant.product.image,
     size: variant.size,
-    color: variant.color
+    color: variant.color,
   };
 
-  return { title, metadata };
+  return { title: composedName, metadata };
 }
 
-// Get or create a product in Stripe based on sync_variant_id or name
+// Get or create a product in Stripe based on sync_variant_id or composed name
 export async function getOrCreateProduct(stripe, title, metadata, DRY_RUN) {
   const search = await stripe.products.search({
     query: `metadata['sync_variant_id']:'${metadata.sync_variant_id}'`,
@@ -128,7 +131,7 @@ export async function ensurePriceExists(stripe, productId, price, syncVariantId,
 
   const expectedMetadata = {
     sync_variant_id: String(syncVariantId),
-    image_url: image
+    image_url: image,
   };
 
   const existing = prices.data.find(p =>
@@ -139,7 +142,7 @@ export async function ensurePriceExists(stripe, productId, price, syncVariantId,
     if (!DRY_RUN) {
       await stripe.prices.update(existing.id, {
         metadata: expectedMetadata,
-        active: true
+        active: true,
       });
     }
     console.log(`🔁 Updated existing price: ${existing.id}`);

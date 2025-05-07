@@ -1,4 +1,5 @@
-// get-printful-variants.ts — Fetches all variants from a Printful product by product_id
+// Supabase Edge Function: get-printful-variants.ts
+// Fetches all variants from a Printful product by product_id
 
 const PRINTFUL_API_KEY = Deno.env.get("PRINTFUL_API_KEY");
 
@@ -35,6 +36,7 @@ interface PrintfulProductResponse {
 Deno.serve(async (req: Request): Promise<Response> => {
   const { searchParams } = new URL(req.url);
   const productId = searchParams.get("product_id");
+  const mode = searchParams.get("mode") || "test"; // optional for future use
 
   if (!PRINTFUL_API_KEY) {
     return new Response(JSON.stringify({ error: "Missing Printful API key" }), {
@@ -43,58 +45,54 @@ Deno.serve(async (req: Request): Promise<Response> => {
     });
   }
 
-  if (!productId) {
-    return new Response(JSON.stringify({ error: "Missing product_id" }), {
+  if (!productId || isNaN(Number(productId))) {
+    return new Response(JSON.stringify({ error: "Invalid or missing product_id" }), {
       status: 400,
       headers: corsHeaders,
     });
   }
 
   try {
-    const res = await fetch(`https://api.printful.com/store/products/${productId}`, {
+    const response = await fetch(`https://api.printful.com/store/products/${productId}`, {
       headers: {
         Authorization: `Bearer ${PRINTFUL_API_KEY}`,
         "Content-Type": "application/json",
       },
     });
 
-    if (!res.ok) {
-      const error = await res.json();
+    if (!response.ok) {
+      const error = await response.json();
       console.error("❌ Printful API error:", error);
       return new Response(JSON.stringify({ error: error.message || "Printful API error" }), {
-        status: res.status,
+        status: response.status,
         headers: corsHeaders,
       });
     }
 
-    const data: PrintfulProductResponse = await res.json();
+    const data: PrintfulProductResponse = await response.json();
+    const variants = (data.result?.sync_variants || []).map((variant) => {
+      const previewFile = variant.files?.find((file) => file.type === "preview");
+      const imageUrl = previewFile?.preview_url || variant.product?.image || "";
 
-    const variants = (data.result?.sync_variants || []).map((v) => {
-      const previewFile = v.files?.find((f) => f.type === "preview");
-      const previewImage = previewFile?.preview_url || v.product?.image || "";
-
-      const baseCode = v.name.split("/")[0].trim(); // e.g., "04H"
-      const stripeProductName = `${baseCode} - ${v.name.trim()}`;
+      const baseCode = variant.name.split("/")[0].trim();
+      const stripeProductName = `${baseCode} - ${variant.name.trim()}`;
 
       return {
-        sync_variant_id: v.id,
-        variant_name: v.name,
+        sync_variant_id: variant.id,
+        variant_name: variant.name,
         stripe_product_name: stripeProductName,
-        size: v.size,
-        color: v.color,
-        available: v.available !== false,
-        retail_price: v.retail_price,
-        image_url: previewImage,
-
-        // No legacy fields returned — clean data only
+        size: variant.size,
+        color: variant.color,
+        available: variant.available !== false,
+        retail_price: variant.retail_price,
+        image_url: imageUrl,
       };
     });
 
-    return new Response(JSON.stringify({ variants }), {
+    return new Response(JSON.stringify({ mode, variants }), {
       status: 200,
       headers: corsHeaders,
     });
-
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unexpected error";
     console.error("❌ Exception in get-printful-variants.ts:", message);

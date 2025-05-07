@@ -1,6 +1,8 @@
-// lookup-stripe-price.ts — Find a Stripe price by product_name (matches either name or printful_variant_name)
+// Supabase Edge Function: lookup-stripe-price.ts
+// Looks up the Stripe price using product name or composed metadata
 
 import Stripe from "https://esm.sh/stripe@12.1.0?target=deno";
+import type { Product, Price } from "https://esm.sh/stripe@12.1.0?target=deno"; // 👈 Fix: import types
 
 const STRIPE_SECRET_TEST = Deno.env.get("STRIPE_SECRET_TEST");
 const STRIPE_SECRET_LIVE = Deno.env.get("STRIPE_SECRET_KEY");
@@ -49,7 +51,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   const STRIPE_SECRET = mode === "live" ? STRIPE_SECRET_LIVE : STRIPE_SECRET_TEST;
-
   if (!STRIPE_SECRET) {
     return new Response(JSON.stringify({ error: `Stripe key for mode '${mode}' is not set` }), {
       status: 500,
@@ -61,34 +62,41 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   try {
     const normalized = product_name.trim().toLowerCase();
+    console.log("🔍 Searching for product:", normalized);
 
     const products = await stripe.products.list({ limit: 100 });
 
-    const product = products.data.find((p: Stripe.Product) => {
+    const product = products.data.find((p: Product) => {
       const name = p.name?.trim().toLowerCase() || "";
       const variantName = p.metadata?.printful_variant_name?.trim().toLowerCase() || "";
-      return name === normalized || variantName === normalized;
+      const productName = p.metadata?.printful_product_name?.trim().toLowerCase() || "";
+      const composed = `${productName} - ${variantName}`.trim().toLowerCase();
+
+      return (
+        name === normalized ||
+        variantName === normalized ||
+        composed === normalized
+      );
     });
 
     if (!product) {
+      console.warn("⚠️ Product not found for name:", normalized);
       return new Response(JSON.stringify({ error: "Product not found" }), {
         status: 404,
         headers: corsHeaders,
       });
     }
 
-    const prices = await stripe.prices.list({ product: product.id, limit: 1 });
+    const prices = await stripe.prices.list({ product: product.id, limit: 100 });
 
-    if (!prices.data.length) {
-      return new Response(JSON.stringify({ error: "No price found for product" }), {
+    const activePrice = prices.data.find((p: Price) => p.active); // 👈 Fix: type price too
+    if (!activePrice) {
+      return new Response(JSON.stringify({ error: "No active price found for product" }), {
         status: 404,
         headers: corsHeaders,
       });
     }
 
-    const price = prices.data[0];
-
-    // Clean metadata for product
     const cleanMetadata = { ...product.metadata };
     delete cleanMetadata.printful_variant_id;
     delete cleanMetadata.legacy_printful_variant_id;
@@ -96,23 +104,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     return new Response(
       JSON.stringify({
-        stripe_price_id: price.id,
-        currency: price.currency,
-        amount: price.unit_amount,
-        metadata: price.metadata,
+        stripe_price_id: activePrice.id,
+        currency: activePrice.currency,
+        amount: activePrice.unit_amount,
+        metadata: activePrice.metadata,
         product: {
           id: product.id,
           name: product.name,
           metadata: cleanMetadata,
         },
       }),
-      {
-        status: 200,
-        headers: corsHeaders,
-      }
+      { status: 200, headers: corsHeaders }
     );
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unexpected error";
+    console.error("❌ lookup-stripe-price error:", message);
     return new Response(JSON.stringify({ error: message }), {
       status: 500,
       headers: corsHeaders,

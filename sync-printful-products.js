@@ -3,7 +3,7 @@
  *
  * Purpose: Sync Printful products and their variants into Stripe.
  * - Avoids duplicates by matching sync_variant_id.
- * - Ensures metadata is clean (legacy keys are never added).
+ * - Ensures metadata is clean (no legacy keys).
  * - Creates or updates prices with proper metadata.
  */
 
@@ -52,23 +52,27 @@ async function run() {
         continue;
       }
 
-      // ✅ Clean metadata — no legacy keys added
+      // ✅ Compose product name: required by lookup-stripe-price.ts
+      const composedName = `${printful_product_name} - ${printful_variant_name}`.trim();
+
+      // ✅ Clean metadata — add stripe_product_name for debugging & matching
       const stripeMetadata = {
         sync_variant_id,
         sku,
         printful_variant_name,
         printful_product_name,
+        stripe_product_name: composedName, // 👈 added here
         size,
         color,
         image_url
       };
 
-      const { id, created } = await getOrCreateProduct(stripe, title, stripeMetadata, DRY_RUN);
+      const { id, created } = await getOrCreateProduct(stripe, composedName, stripeMetadata, DRY_RUN);
 
       await ensurePriceExists(stripe, id, price, sync_variant_id, image_url, DRY_RUN);
 
       created ? added++ : updated++;
-      console.log(`${created ? "➕ Created" : "🔁 Updated"}: ${title}`);
+      console.log(`${created ? "➕ Created" : "🔁 Updated"}: ${composedName}`);
     } catch (err) {
       console.error(`❌ Error syncing ${title}: ${err.message}`);
       errored++;
