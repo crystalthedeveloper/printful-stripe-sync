@@ -75,18 +75,19 @@ export function loadVariants(productId, blockEl, mode = "test") {
   async function updateStripePriceId(variant) {
     if (variant?.stripe_price_id || !variant?.printful_product_name || !variant?.variant_name) return;
 
-    // Compose product name with normalized whitespace, remove special chars, and safe fallback
-    const safeProductName = `${(variant.printful_product_name || "")
-      .replace(/\s+/g, " ")
-      .replace(/[-_/\\]+$/, "")
-      .replace(/[()]/g, "")
-      .replace(/[^\w\s-]/g, "")
-      .trim()} - ${(variant.variant_name || "")
-      .replace(/\s+/g, " ")
-      .replace(/[-_/\\]+$/, "")
-      .replace(/[()]/g, "")
-      .replace(/[^\w\s-]/g, "")
-      .trim()}`;
+    // More robust normalization for product/variant names for Stripe price lookup
+    const normalize = str => (str || "")
+      .normalize("NFD")                   // Unicode normalization
+      .replace(/[\u0300-\u036f]/g, "")    // Remove accents
+      .replace(/[’']/g, "")               // Remove apostrophes
+      .replace(/[()]/g, "")               // Remove parentheses
+      .replace(/[^\w\s-]/g, "")           // Remove non-alphanumeric symbols except dashes
+      .replace(/\s+/g, " ")               // Collapse whitespace
+      .replace(/[-_/\\]+$/, "")           // Remove trailing dashes or slashes
+      .trim()
+      .toLowerCase();
+
+    const safeProductName = `${normalize(variant.printful_product_name)} - ${normalize(variant.variant_name)}`;
     // Debug log for exact composed name
     console.log("🔎 Looking up Stripe price for:", `${variant.printful_product_name} - ${variant.variant_name}`);
 
