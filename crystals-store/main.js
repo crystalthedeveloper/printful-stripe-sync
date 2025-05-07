@@ -1,7 +1,7 @@
 // main.js
 
-import { updateCartUI } from "./ui.js";
-import { loadVariants, checkoutCart } from "./variants.js";
+import { updateCartUI } from "https://cdn.jsdelivr.net/gh/crystalthedeveloper/printful-stripe-sync@v0.2.0/crystals-store/ui.js";
+import { loadVariants, checkoutCart } from "https://cdn.jsdelivr.net/gh/crystalthedeveloper/printful-stripe-sync@v0.2.0/crystals-store/variants.js";
 
 // Set this to "live" for production mode
 const STRIPE_MODE = "test"; // or "live"
