@@ -77,8 +77,16 @@ export function loadVariants(productId, blockEl, mode = "test") {
   async function updateStripePriceId(variant) {
     if (variant?.stripe_price_id || !variant?.printful_product_name || !variant?.variant_name) return;
 
-    // Compose product name with normalized whitespace and safe fallback
-    const safeProductName = `${(variant.printful_product_name || "").replace(/\s+/g, " ").trim()} - ${(variant.variant_name || "").replace(/\s+/g, " ").trim()}`;
+    // Compose product name with normalized whitespace, remove special chars, and safe fallback
+    const safeProductName = `${(variant.printful_product_name || "")
+      .replace(/\s+/g, " ")
+      .replace(/[()]/g, "")
+      .replace(/[^\w\s-]/g, "")
+      .trim()} - ${(variant.variant_name || "")
+      .replace(/\s+/g, " ")
+      .replace(/[()]/g, "")
+      .replace(/[^\w\s-]/g, "")
+      .trim()}`;
     // Debug log for exact composed name
     console.log("🔎 Looking up Stripe price for:", `${variant.printful_product_name} - ${variant.variant_name}`);
 

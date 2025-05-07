@@ -63,21 +63,29 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   try {
     const normalized = product_name
-      .trim()
+      .replace(/[()]/g, "")               // remove parentheses
+      .replace(/\s+/g, " ")               // collapse multiple spaces
+      .replace(/[-_/\\]+$/, "")           // remove trailing dashes, slashes
+      .replace(/[^\w\s-]/g, "")           // remove unexpected symbols
       .toLowerCase()
-      .replace(/\s+/g, ' ')        // Collapse multiple spaces
-      .replace(/[-_/\\]+$/, '')   // Remove trailing dashes, slashes
-      .replace(/[^\w\s-]/g, '')   // Remove unexpected symbols
       .trim();
     console.log("🔍 Searching for product:", normalized);
 
     const products = await stripe.products.list({ limit: 100 });
 
     const product = products.data.find((p: Product) => {
-      const name = p.name?.trim().toLowerCase() || "";
-      const variantName = p.metadata?.printful_variant_name?.trim().toLowerCase() || "";
-      const productName = p.metadata?.printful_product_name?.trim().toLowerCase() || "";
-      const composed = `${productName} - ${variantName}`.trim().toLowerCase();
+      const normalize = (str?: string) =>
+        (str || "")
+          .replace(/[()]/g, "")
+          .replace(/\s+/g, " ")
+          .replace(/[^\w\s-]/g, "")
+          .toLowerCase()
+          .trim();
+
+      const name = normalize(p.name);
+      const variantName = normalize(p.metadata?.printful_variant_name);
+      const productName = normalize(p.metadata?.printful_product_name);
+      const composed = normalize(`${productName} - ${variantName}`);
 
       return (
         name === normalized ||
