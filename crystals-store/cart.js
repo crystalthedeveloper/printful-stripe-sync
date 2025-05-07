@@ -45,7 +45,6 @@ export function addToCart(variant) {
 
   saveCart(cart);
   updateCartUI();
-
   const modal = document.getElementById("cart-modal");
   if (modal) modal.classList.remove("hidden");
 }

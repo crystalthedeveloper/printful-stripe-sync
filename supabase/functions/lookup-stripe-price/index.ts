@@ -59,9 +59,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   const stripe = new Stripe(STRIPE_SECRET, { apiVersion: "2023-10-16" });
+  // Normalize the product name to account for inconsistencies in spacing or SKU suffixes, improving compatibility on mobile
 
   try {
-    const normalized = product_name.trim().toLowerCase();
+    const normalized = product_name
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ')        // Collapse multiple spaces
+      .replace(/[-_/\\]+$/, '')   // Remove trailing dashes, slashes
+      .replace(/[^\w\s-]/g, '')   // Remove unexpected symbols
+      .trim();
     console.log("🔍 Searching for product:", normalized);
 
     const products = await stripe.products.list({ limit: 100 });
@@ -75,7 +82,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return (
         name === normalized ||
         variantName === normalized ||
-        composed === normalized
+        composed === normalized ||
+        name.includes(normalized) ||
+        composed.includes(normalized)
       );
     });
 
@@ -107,6 +116,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         stripe_price_id: activePrice.id,
         currency: activePrice.currency,
         amount: activePrice.unit_amount,
+        retail_price: (activePrice.unit_amount || 0) / 100, // Ensure frontend can display the price
         metadata: activePrice.metadata,
         product: {
           id: product.id,

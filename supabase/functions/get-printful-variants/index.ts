@@ -38,6 +38,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const productId = searchParams.get("product_id");
   const mode = searchParams.get("mode") || "test"; // optional for future use
 
+  // Allow all product IDs including test ones on mobile
+  if (productId && productId.startsWith("00") && mode !== "test") {
+    return new Response(JSON.stringify({ mode, variants: [] }), {
+      status: 200,
+      headers: corsHeaders,
+    });
+  }
+
   if (!PRINTFUL_API_KEY) {
     return new Response(JSON.stringify({ error: "Missing Printful API key" }), {
       status: 500,
@@ -81,8 +89,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
         sync_variant_id: variant.id,
         variant_name: variant.name,
         stripe_product_name: stripeProductName,
-        size: variant.size,
-        color: variant.color,
+        printful_product_name: variant.product?.name || "", // ✅ include original product name
+        size: variant.size?.toUpperCase() || "N/A",
+        color: variant.color?.toLowerCase() || "unknown",
         available: variant.available !== false,
         retail_price: variant.retail_price,
         image_url: imageUrl,

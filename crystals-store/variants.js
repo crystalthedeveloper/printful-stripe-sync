@@ -7,6 +7,11 @@ const priceLookupEndpoint = "https://busjhforwvqhuaivgbac.supabase.co/functions/
 const checkoutEndpoint = "https://busjhforwvqhuaivgbac.supabase.co/functions/v1/create-checkout-session";
 
 export function loadVariants(productId, blockEl, mode = "test") {
+  if (!blockEl.classList.contains("product-block")) {
+    console.warn("⛔ Invalid blockEl passed to loadVariants. Skipping.");
+    return;
+  }
+
   console.log("🔍 Loading variants for product ID:", productId);
 
   const priceEl = blockEl.querySelector(".price");
@@ -15,6 +20,17 @@ export function loadVariants(productId, blockEl, mode = "test") {
   const sizeContainer = blockEl.querySelector(".size-options");
   const addToCartBtn = blockEl.querySelector(".add-to-cart");
   const buyNowBtn = blockEl.querySelector(".buy-now");
+
+  // Debug log for containers
+  console.log({
+    blockEl,
+    priceEl,
+    variantContainer,
+    colorContainer,
+    sizeContainer,
+    addToCartBtn,
+    buyNowBtn
+  });
 
   if (!variantContainer || !colorContainer || !sizeContainer || !addToCartBtn || !buyNowBtn) {
     console.warn("⚠️ Missing variant UI containers");
@@ -44,6 +60,8 @@ export function loadVariants(productId, blockEl, mode = "test") {
 
   function updatePriceDisplay(variant) {
     if (priceEl && variant?.retail_price) {
+      priceEl.style.display = "block";
+      priceEl.style.visibility = "visible";
       priceEl.textContent = `$${parseFloat(variant.retail_price).toFixed(2)} CAD`;
     }
   }
@@ -57,14 +75,14 @@ export function loadVariants(productId, blockEl, mode = "test") {
   }
 
   async function updateStripePriceId(variant) {
-    if (variant?.stripe_price_id || !variant?.stripe_product_name) return;
+    if (variant?.stripe_price_id || !variant?.printful_product_name || !variant?.variant_name) return;
 
     try {
       const res = await fetch(priceLookupEndpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          product_name: variant.stripe_product_name.trim(),
+          product_name: `${variant.printful_product_name.trim()} - ${variant.variant_name.trim()}`,
           mode
         })
       });
@@ -73,7 +91,7 @@ export function loadVariants(productId, blockEl, mode = "test") {
       if (data?.stripe_price_id) {
         variant.stripe_price_id = data.stripe_price_id;
       } else {
-        console.warn("❌ No Stripe price found for:", variant.stripe_product_name);
+        console.warn("❌ No Stripe price found for:", `${variant.printful_product_name} - ${variant.variant_name}`);
       }
     } catch (err) {
       console.error("❌ Stripe price lookup failed:", err);
@@ -117,10 +135,24 @@ export function loadVariants(productId, blockEl, mode = "test") {
       colorContainer.innerHTML = [...colors.entries()].map(([color, available]) =>
         `<span class="color-option option ${available ? "" : "disabled"}" data-value="${color}">${color}</span>`
       ).join("");
+      colorContainer.style.display = "block";
+      colorContainer.offsetHeight; // trigger reflow
 
       sizeContainer.innerHTML = [...sizes.entries()].map(([size, available]) =>
         `<span class="size-option option ${available ? "" : "disabled"}" data-value="${size}">${size}</span>`
       ).join("");
+      sizeContainer.style.display = "block";
+      sizeContainer.offsetHeight; // trigger reflow
+
+      // Ensure mobile-safe visibility
+      [colorContainer, sizeContainer, variantContainer].forEach(el => {
+        el.style.display = "flex";
+        el.style.flexWrap = "wrap";
+        el.style.visibility = "visible";
+        el.style.opacity = "1";
+        el.style.maxHeight = "none";
+        el.style.maxWidth = "100%";
+      });
 
       colorContainer.querySelectorAll(".color-option:not(.disabled)").forEach(span => {
         span.addEventListener("click", async () => {
@@ -244,4 +276,47 @@ export function checkoutCart(mode = "test") {
     .catch(err => {
       console.error("❌ Cart Checkout error:", err);
     });
+}
+
+// Automatically initialize variant blocks after DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.product-block[data-product-id]').forEach(block => {
+      const productId = block.getAttribute('data-product-id');
+      const isStatic = block.classList.contains('product-block-no-variants');
+      if (productId && !isStatic) loadVariants(productId, block);
+    });
+
+    // Additional fallback logic for .product-block-no-variants
+    document.querySelectorAll('.product-block-no-variants').forEach(block => {
+      const priceEl = block.querySelector('.price');
+      const rawPrice = block.getAttribute('data-price') || "0";
+
+      if (priceEl) {
+        if (priceEl.textContent.trim() === "") {
+          priceEl.textContent = `$${parseFloat(rawPrice).toFixed(2)} CAD`;
+          priceEl.style.display = "block";
+        }
+      }
+    });
+  });
+} else {
+  document.querySelectorAll('.product-block[data-product-id]').forEach(block => {
+    const productId = block.getAttribute('data-product-id');
+    const isStatic = block.classList.contains('product-block-no-variants');
+    if (productId && !isStatic) loadVariants(productId, block);
+  });
+
+  // Additional fallback logic for .product-block-no-variants
+  document.querySelectorAll('.product-block-no-variants').forEach(block => {
+    const priceEl = block.querySelector('.price');
+    const rawPrice = block.getAttribute('data-price') || "0";
+
+    if (priceEl) {
+      if (priceEl.textContent.trim() === "") {
+        priceEl.textContent = `$${parseFloat(rawPrice).toFixed(2)} CAD`;
+        priceEl.style.display = "block";
+      }
+    }
+  });
 }

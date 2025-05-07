@@ -28,7 +28,20 @@ document.addEventListener("DOMContentLoaded", () => {
         block.querySelector(".size-options");
 
       if (hasVariantUI) {
+        // Force layout reflow to fix mobile rendering issues
+        block.style.display = "none";
+        block.offsetHeight; // trigger reflow
+        block.style.display = "";
+
         loadVariants(productId, block, STRIPE_MODE);
+
+        setTimeout(() => {
+          const variantSection = block.querySelector(".variant-output");
+          if (variantSection) {
+            variantSection.style.display = "flex";
+            variantSection.style.visibility = "visible";
+          }
+        }, 100);
       }
     });
 
@@ -46,7 +59,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // Format the price text
       if (priceEl) {
-        priceEl.textContent = `$${parseFloat(rawPrice).toFixed(2)} CAD`;
+        setTimeout(() => {
+          priceEl.textContent = `$${parseFloat(rawPrice).toFixed(2)} CAD`;
+          priceEl.style.display = "block";
+        }, 0);
       }
 
       const buyBtn = block.querySelector(".buy-now-website");
