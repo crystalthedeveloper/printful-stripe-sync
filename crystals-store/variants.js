@@ -1,5 +1,3 @@
-// variants.js
-
 import { addToCart, getCart, updateCartUI } from "./cart.js";
 
 const variantEndpoint = "https://busjhforwvqhuaivgbac.supabase.co/functions/v1/get-printful-variants";
@@ -193,8 +191,9 @@ export function loadVariants(productId, blockEl, mode = "test") {
     const variant = findMatchingVariant();
     await updateStripePriceId(variant);
 
-    if (!variant?.stripe_price_id) {
+    if (!variant || !variant.stripe_price_id) {
       console.warn("⚠️ No Stripe price ID on Add to Cart variant:", variant);
+      alert("Please wait a moment while we finish loading the product price.");
       return;
     }
 

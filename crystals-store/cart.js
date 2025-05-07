@@ -130,7 +130,7 @@ export function updateCartUI() {
             <p>${name} - ${color} / ${size}</p>
             <p>
               $${price.toFixed(2)} x 
-              <input type="number" min="1" value="${item.quantity}" 
+              <input type="number" min="1" inputmode="numeric" pattern="[0-9]*" value="${item.quantity}" 
                 data-id="${item.variant_id}" 
                 data-size="${size}" 
                 data-color="${color}" 
