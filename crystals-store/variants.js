@@ -193,6 +193,7 @@ export function loadVariants(productId, blockEl, mode = "test") {
   addToCartBtn.addEventListener("click", async () => {
     const variant = findMatchingVariant();
 
+    // Guard clause to ensure both size and color are selected
     if (!variant) {
       console.warn("⚠️ No matching variant selected. Ensure both size and color are selected.");
       alert("Please select both a size and color.");
@@ -204,6 +205,7 @@ export function loadVariants(productId, blockEl, mode = "test") {
 
     await updateStripePriceId(variant);
 
+    // Improved check for the price ID
     if (!variant?.stripe_price_id) {
       console.warn("⚠️ No Stripe price ID on Add to Cart variant:", variant);
       alert("Price is still loading. Please wait a moment and try again.");
