@@ -87,7 +87,7 @@ export function loadVariants(productId, blockEl, mode = "test") {
       .trim()
       .toLowerCase();
 
-    const safeProductName = `${normalize(variant.printful_product_name)} - ${normalize(variant.variant_name)}`;
+    const safeProductName = `${normalize(variant.printful_product_name)} - ${normalize(variant.variant_name)}`.replace(/\|/g, "");
     // Debug log for exact composed name
     console.log("🔎 Looking up Stripe price for:", `${variant.printful_product_name} - ${variant.variant_name}`);
 
@@ -205,10 +205,15 @@ export function loadVariants(productId, blockEl, mode = "test") {
 
     await updateStripePriceId(variant);
 
-    // Improved check for the price ID
     if (!variant?.stripe_price_id) {
       console.warn("⚠️ No Stripe price ID on Add to Cart variant:", variant);
       alert("Price is still loading. Please wait a moment and try again.");
+      return;
+    }
+
+    if (!variant?.stripe_price_id) {
+      console.warn("⚠️ No Stripe price ID on Add to Cart variant after retry:", variant);
+      alert("Product price is still loading. Please try again shortly.");
       return;
     }
 
