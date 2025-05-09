@@ -14,6 +14,10 @@ export function saveCart(cart) {
 }
 
 export function addToCart(variant) {
+  if (!variant?.stripe_price_id) {
+    console.warn("⚠️ Skipping Add to Cart — missing stripe_price_id:", variant);
+    return;
+  }
   const cart = getCart();
   const price = parseFloat(variant.price) || 0;
   const id = String(variant.variant_id || variant.printful_variant_id);

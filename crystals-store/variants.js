@@ -192,11 +192,21 @@ export function loadVariants(productId, blockEl, mode = "test") {
 
   addToCartBtn.addEventListener("click", async () => {
     const variant = findMatchingVariant();
+
+    if (!variant) {
+      console.warn("⚠️ No matching variant selected. Ensure both size and color are selected.");
+      alert("Please select both a size and color.");
+      return;
+    }
+
+    // Log the variant object and its fields for debugging
+    console.log("🛒 Add to Cart - Selected variant:", variant);
+
     await updateStripePriceId(variant);
 
-    if (!variant || !variant.stripe_price_id) {
+    if (!variant?.stripe_price_id) {
       console.warn("⚠️ No Stripe price ID on Add to Cart variant:", variant);
-      alert("Please wait a moment while we finish loading the product price.");
+      alert("Price is still loading. Please wait a moment and try again.");
       return;
     }
 
