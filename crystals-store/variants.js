@@ -82,6 +82,7 @@ export function loadVariants(productId, blockEl, mode = "test") {
       .replace(/[’']/g, "")               // Remove apostrophes
       .replace(/[()]/g, "")               // Remove parentheses
       .replace(/[^\w\s-]/g, "")           // Remove non-alphanumeric symbols except dashes
+      .replace(/-/g, "")                  // remove dashes
       .replace(/\s+/g, " ")               // Collapse whitespace
       .replace(/[-_/\\]+$/, "")           // Remove trailing dashes or slashes
       .trim()

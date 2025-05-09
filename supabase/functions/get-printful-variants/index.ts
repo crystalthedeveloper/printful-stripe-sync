@@ -82,14 +82,22 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const previewFile = variant.files?.find((file) => file.type === "preview");
       const imageUrl = previewFile?.preview_url || variant.product?.image || "";
 
-      const baseCode = variant.name.split("/")[0].trim();
-      const stripeProductName = `${baseCode} - ${variant.name.trim()}`;
+      // Sanitize names to match Stripe metadata
+      const sanitizeName = (name: string = "") =>
+        name
+          .replace(/\|/g, "")
+          .replace(/[()]/g, "")
+          .replace(/[^\w\s-]/g, "")
+          .trim();
+
+      const baseCode = (variant.name || "").split("/")[0].trim();
+      const stripeProductName = `${baseCode} - ${(variant.name || "").trim()}`;
 
       return {
         sync_variant_id: variant.id,
-        variant_name: variant.name,
+        variant_name: sanitizeName(variant.name),
         stripe_product_name: stripeProductName,
-        printful_product_name: variant.product?.name || "", // ✅ include original product name
+        printful_product_name: sanitizeName(variant.product?.name || ""), // ✅ sanitized product name
         size: variant.size?.toUpperCase() || "N/A",
         color: variant.color?.toLowerCase() || "unknown",
         available: variant.available !== false,

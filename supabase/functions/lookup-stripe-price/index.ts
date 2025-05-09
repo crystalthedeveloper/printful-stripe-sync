@@ -63,10 +63,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   try {
     const normalized = product_name
-      .replace(/[()]/g, "")               // remove parentheses
-      .replace(/\s+/g, " ")               // collapse multiple spaces
-      .replace(/[-_/\\]+$/, "")           // remove trailing dashes, slashes
-      .replace(/[^\w\s-]/g, "")           // remove unexpected symbols
+      .replace(/[()]/g, "")
+      .replace(/\s+/g, " ")
+      .replace(/[-_/\\]+$/, "")
+      .replace(/[^\w\s-]/g, "")
+      .replace(/[-]/g, "")
       .toLowerCase()
       .trim();
     console.log("🔍 Searching for product:", normalized);
@@ -79,6 +80,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
           .replace(/[()]/g, "")
           .replace(/\s+/g, " ")
           .replace(/[^\w\s-]/g, "")
+          .replace(/[-]/g, "")
           .toLowerCase()
           .trim();
 
