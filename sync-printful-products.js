@@ -64,7 +64,8 @@ async function run() {
         stripe_product_name: composedName, // 👈 added here
         size,
         color,
-        image_url
+        image_url,
+        mode: MODE
       };
 
       const { id, created } = await getOrCreateProduct(stripe, composedName, stripeMetadata, DRY_RUN);

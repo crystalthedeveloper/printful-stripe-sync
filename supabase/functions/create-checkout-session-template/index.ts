@@ -17,7 +17,7 @@ serve(async (req)=>{
       headers: corsHeaders
     });
   }
-  const { productId, name, price, mode = "test" } = await req.json();
+  const { productId, name, price, mode = "live" } = await req.json();
   if (!productId || !name || !price) {
     return new Response(JSON.stringify({
       error: "Missing product info"

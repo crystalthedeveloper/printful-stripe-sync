@@ -36,10 +36,10 @@ interface PrintfulProductResponse {
 Deno.serve(async (req: Request): Promise<Response> => {
   const { searchParams } = new URL(req.url);
   const productId = searchParams.get("product_id");
-  const mode = searchParams.get("mode") || "test"; // optional for future use
+  const mode = searchParams.get("mode") || "live"; // optional for future use
 
   // Allow all product IDs including test ones on mobile
-  if (productId && productId.startsWith("00") && mode !== "test") {
+  if (productId && productId.startsWith("00") && mode !== "live") {
     return new Response(JSON.stringify({ mode, variants: [] }), {
       status: 200,
       headers: corsHeaders,
@@ -90,14 +90,26 @@ Deno.serve(async (req: Request): Promise<Response> => {
           .replace(/[^\w\s-]/g, "")
           .trim();
 
-      const baseCode = (variant.name || "").split("/")[0].trim();
-      const stripeProductName = `${baseCode} - ${(variant.name || "").trim()}`;
+      const originalProductName = variant.product?.name || "";
+      const originalVariantName = variant.name;
+
+      const sanitizedProductName = sanitizeName(originalProductName);
+      const sanitizedVariantName = sanitizeName(originalVariantName);
+      const stripeProductName = `${sanitizedProductName} - ${sanitizedVariantName}`;
+
+      console.log("🔍 Stripe Name Mapping:", {
+        originalProductName,
+        originalVariantName,
+        sanitizedProductName,
+        sanitizedVariantName,
+        stripeProductName
+      });
 
       return {
         sync_variant_id: variant.id,
-        variant_name: sanitizeName(variant.name),
+        variant_name: sanitizedVariantName,
         stripe_product_name: stripeProductName,
-        printful_product_name: sanitizeName(variant.product?.name || ""), // ✅ sanitized product name
+        printful_product_name: sanitizedProductName, // ✅ sanitized product name
         size: variant.size?.toUpperCase() || "N/A",
         color: variant.color?.toLowerCase() || "unknown",
         available: variant.available !== false,

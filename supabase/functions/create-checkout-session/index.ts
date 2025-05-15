@@ -2,7 +2,7 @@
 import { serve } from "https://deno.land/std@0.192.0/http/server.ts";
 
 // ✅ Change this to "live" when ready to go live
-const MODE: "test" | "live" = "test";
+const MODE: "test" | "live" = "live";
 
 const STRIPE_SECRET_TEST = Deno.env.get("STRIPE_SECRET_TEST");
 const STRIPE_SECRET_LIVE = Deno.env.get("STRIPE_SECRET_KEY");
@@ -16,7 +16,7 @@ const corsHeaders = {
   "Content-Type": "application/json"
 };
 
-const STRIPE_SECRET_KEY = MODE === "test" ? STRIPE_SECRET_TEST : STRIPE_SECRET_LIVE;
+const STRIPE_SECRET_KEY = MODE === "live" ? STRIPE_SECRET_TEST : STRIPE_SECRET_LIVE;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {

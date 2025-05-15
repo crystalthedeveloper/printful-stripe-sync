@@ -133,7 +133,9 @@ serve(async (req: Request): Promise<Response> => {
         email: session.customer_details?.email || "no-reply@example.com",
       },
       items: validItems,
-      confirm: mode === "live", // 🔁 Live orders get confirmed automatically
+      //confirm: mode === "live", // 🔁 Live orders get confirmed automatically
+      confirm: true, // ✅ Force confirm for ALL modes — orders will go live Stripe checkout automatically pushes the order live to production — no more drafts.
+
     };
 
     const pfRes = await fetch("https://api.printful.com/orders", {

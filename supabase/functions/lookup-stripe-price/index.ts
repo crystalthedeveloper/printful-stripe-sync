@@ -1,14 +1,13 @@
 // Supabase Edge Function: lookup-stripe-price.ts
-// Looks up the Stripe price using product name or composed metadata
-
 import Stripe from "https://esm.sh/stripe@12.1.0?target=deno";
-import type { Product, Price } from "https://esm.sh/stripe@12.1.0?target=deno"; // 👈 Fix: import types
+import type { Product, Price } from "https://esm.sh/stripe@12.1.0?target=deno";
 
 const STRIPE_SECRET_TEST = Deno.env.get("STRIPE_SECRET_TEST");
 const STRIPE_SECRET_LIVE = Deno.env.get("STRIPE_SECRET_KEY");
 
 interface LookupRequest {
-  product_name: string;
+  product_name?: string;
+  sync_variant_id?: string;
   mode: "test" | "live";
 }
 
@@ -41,10 +40,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     });
   }
 
-  const { product_name, mode } = body;
+  const { product_name, sync_variant_id, mode } = body;
 
-  if (!product_name || !mode || !["test", "live"].includes(mode)) {
-    return new Response(JSON.stringify({ error: "Missing or invalid product_name or mode" }), {
+  if (!mode || !["test", "live"].includes(mode)) {
+    return new Response(JSON.stringify({ error: "Missing or invalid mode" }), {
       status: 400,
       headers: corsHeaders,
     });
@@ -59,47 +58,66 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   const stripe = new Stripe(STRIPE_SECRET, { apiVersion: "2023-10-16" });
-  // Normalize the product name to account for inconsistencies in spacing or SKU suffixes, improving compatibility on mobile
 
   try {
-    const normalized = product_name
-      .replace(/[()]/g, "")
-      .replace(/\s+/g, " ")
-      .replace(/[-_/\\]+$/, "")
-      .replace(/[^\w\s-]/g, "")
-      .replace(/[-]/g, "")
-      .toLowerCase()
-      .trim();
-    console.log("🔍 Searching for product:", normalized);
+    // 🔍 1. Prefer sync_variant_id for exact match
+    if (sync_variant_id) {
+      const priceSearch = await stripe.prices.search({
+        query: `metadata['sync_variant_id']:'${sync_variant_id}'`,
+      });
+
+      if (priceSearch.data.length > 0) {
+        const price = priceSearch.data[0];
+        const product = await stripe.products.retrieve(price.product as string);
+
+        return new Response(JSON.stringify({
+          stripe_price_id: price.id,
+          currency: price.currency,
+          amount: price.unit_amount,
+          retail_price: (price.unit_amount || 0) / 100,
+          metadata: price.metadata,
+          product: {
+            id: product.id,
+            name: product.name,
+            metadata: product.metadata,
+          },
+        }), { status: 200, headers: corsHeaders });
+      }
+    }
+
+    // 🔍 2. Fallback: fuzzy match by normalized product_name
+    if (!product_name) {
+      return new Response(JSON.stringify({ error: "Missing product_name or sync_variant_id" }), {
+        status: 400,
+        headers: corsHeaders,
+      });
+    }
+
+    const normalize = (str?: string) =>
+      (str || "")
+        .normalize("NFKD")
+        .replace(/[’']/g, "")
+        .replace(/[-()_/\\|]/g, "")
+        .replace(/[^\w\s]/g, "")
+        .replace(/\s+/g, " ")
+        .toLowerCase()
+        .trim();
+
+    const normalizedInput = normalize(product_name);
+    console.log("🔍 Searching fallback for:", normalizedInput);
 
     const products = await stripe.products.list({ limit: 100 });
 
     const product = products.data.find((p: Product) => {
-      const normalize = (str?: string) =>
-        (str || "")
-          .replace(/[()]/g, "")
-          .replace(/\s+/g, " ")
-          .replace(/[^\w\s-]/g, "")
-          .replace(/[-]/g, "")
-          .toLowerCase()
-          .trim();
-
-      const name = normalize(p.name);
-      const variantName = normalize(p.metadata?.printful_variant_name);
-      const productName = normalize(p.metadata?.printful_product_name);
-      const composed = normalize(`${productName} - ${variantName}`);
-
+      const composed = normalize(`${p.metadata?.printful_product_name} - ${p.metadata?.printful_variant_name}`);
       return (
-        name === normalized ||
-        variantName === normalized ||
-        composed === normalized ||
-        name.includes(normalized) ||
-        composed.includes(normalized)
+        normalize(p.name) === normalizedInput ||
+        composed === normalizedInput ||
+        composed.includes(normalizedInput)
       );
     });
 
     if (!product) {
-      console.warn("⚠️ Product not found for name:", normalized);
       return new Response(JSON.stringify({ error: "Product not found" }), {
         status: 404,
         headers: corsHeaders,
@@ -107,35 +125,28 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     const prices = await stripe.prices.list({ product: product.id, limit: 100 });
+    const activePrice = prices.data.find((p: Price) => p.active);
 
-    const activePrice = prices.data.find((p: Price) => p.active); // 👈 Fix: type price too
     if (!activePrice) {
-      return new Response(JSON.stringify({ error: "No active price found for product" }), {
+      return new Response(JSON.stringify({ error: "No active price found" }), {
         status: 404,
         headers: corsHeaders,
       });
     }
 
-    const cleanMetadata = { ...product.metadata };
-    delete cleanMetadata.printful_variant_id;
-    delete cleanMetadata.legacy_printful_variant_id;
-    delete cleanMetadata.legacy_printful_sync_product_id;
+    return new Response(JSON.stringify({
+      stripe_price_id: activePrice.id,
+      currency: activePrice.currency,
+      amount: activePrice.unit_amount,
+      retail_price: (activePrice.unit_amount || 0) / 100,
+      metadata: activePrice.metadata,
+      product: {
+        id: product.id,
+        name: product.name,
+        metadata: product.metadata,
+      },
+    }), { status: 200, headers: corsHeaders });
 
-    return new Response(
-      JSON.stringify({
-        stripe_price_id: activePrice.id,
-        currency: activePrice.currency,
-        amount: activePrice.unit_amount,
-        retail_price: (activePrice.unit_amount || 0) / 100, // Ensure frontend can display the price
-        metadata: activePrice.metadata,
-        product: {
-          id: product.id,
-          name: product.name,
-          metadata: cleanMetadata,
-        },
-      }),
-      { status: 200, headers: corsHeaders }
-    );
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unexpected error";
     console.error("❌ lookup-stripe-price error:", message);

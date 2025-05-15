@@ -14,8 +14,9 @@ export function saveCart(cart) {
 }
 
 export function addToCart(variant) {
+  console.log("🧪 Debug Add to Cart - Incoming Variant:", JSON.stringify(variant, null, 2));
   if (!variant?.stripe_price_id) {
-    console.warn("⚠️ Skipping Add to Cart — missing stripe_price_id:", variant);
+    console.warn(`⚠️ Skipping Add to Cart — missing stripe_price_id for variant:`, variant?.variant_name || variant?.name || "Unnamed", variant);
     return;
   }
   const cart = getCart();
@@ -45,6 +46,7 @@ export function addToCart(variant) {
       price,
       quantity: 1
     });
+    console.log("✅ Variant added to cart:", JSON.stringify(cart[cart.length - 1], null, 2));
   }
 
   saveCart(cart);
@@ -134,7 +136,7 @@ export function updateCartUI() {
             <p>${name} - ${color} / ${size}</p>
             <p>
               $${price.toFixed(2)} x 
-              <input type="number" min="1" inputmode="numeric" pattern="[0-9]*" value="${item.quantity}" 
+              <input type="number" min="1" inputmode="numeric" pattern="[0-9]*" style="font-size: 16px;" value="${item.quantity}" 
                 data-id="${item.variant_id}" 
                 data-size="${size}" 
                 data-color="${color}" 

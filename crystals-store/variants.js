@@ -4,7 +4,7 @@ const variantEndpoint = "https://busjhforwvqhuaivgbac.supabase.co/functions/v1/g
 const priceLookupEndpoint = "https://busjhforwvqhuaivgbac.supabase.co/functions/v1/lookup-stripe-price";
 const checkoutEndpoint = "https://busjhforwvqhuaivgbac.supabase.co/functions/v1/create-checkout-session";
 
-export function loadVariants(productId, blockEl, mode = "test") {
+export function loadVariants(productId, blockEl, mode = "live") {
   if (!blockEl.classList.contains("product-block")) {
     console.warn("⛔ Invalid blockEl passed to loadVariants. Skipping.");
     return;
@@ -74,44 +74,46 @@ export function loadVariants(productId, blockEl, mode = "test") {
 
   async function updateStripePriceId(variant) {
     if (variant?.stripe_price_id || !variant?.printful_product_name || !variant?.variant_name) return;
-
-    // More robust normalization for product/variant names for Stripe price lookup
-    const normalize = str => (str || "")
-      .normalize("NFD")                   // Unicode normalization
-      .replace(/[\u0300-\u036f]/g, "")    // Remove accents
-      .replace(/[’']/g, "")               // Remove apostrophes
-      .replace(/[()]/g, "")               // Remove parentheses
-      .replace(/[^\w\s-]/g, "")           // Remove non-alphanumeric symbols except dashes
-      .replace(/-/g, "")                  // remove dashes
-      .replace(/\s+/g, " ")               // Collapse whitespace
-      .replace(/[-_/\\]+$/, "")           // Remove trailing dashes or slashes
-      .trim()
-      .toLowerCase();
-
-    const safeProductName = `${normalize(variant.printful_product_name)} - ${normalize(variant.variant_name)}`.replace(/\|/g, "");
-    // Debug log for exact composed name
-    console.log("🔎 Looking up Stripe price for:", `${variant.printful_product_name} - ${variant.variant_name}`);
-
+  
+    const normalize = str => str?.normalize("NFKD")
+      .replace(/[’']/g, "")
+      .replace(/[-()_/\\|]/g, "")
+      .replace(/[^\w\s]/g, "")
+      .replace(/\s+/g, " ")
+      .toLowerCase()
+      .trim() || "";
+  
+    const safeProductName = `${normalize(variant.printful_product_name)} - ${normalize(variant.variant_name)}`;
+    const syncVariantId = variant.sync_variant_id || variant.printful_store_variant_id;
+  
+    console.log("🧪 Stripe Price Lookup →", {
+      safeProductName,
+      syncVariantId,
+      mode
+    });
+  
     try {
       const res = await fetch(priceLookupEndpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           product_name: safeProductName,
+          sync_variant_id: syncVariantId,
           mode
         })
       });
-
+  
       const data = await res.json();
+      console.log("🧪 Response from Stripe price lookup:", data);
       if (data?.stripe_price_id) {
         variant.stripe_price_id = data.stripe_price_id;
       } else {
-        console.warn("❌ No Stripe price found for:", safeProductName);
+        console.warn("❌ No Stripe price found for:", safeProductName, syncVariantId);
       }
     } catch (err) {
       console.error("❌ Stripe price lookup failed:", err);
     }
-  }
+  }    
 
   async function updateButtons() {
     const matched = findMatchingVariant();
@@ -194,27 +196,24 @@ export function loadVariants(productId, blockEl, mode = "test") {
   addToCartBtn.addEventListener("click", async () => {
     const variant = findMatchingVariant();
 
-    // Guard clause to ensure both size and color are selected
+    console.log("🛒 Attempting Add to Cart", {
+      selectedSize,
+      selectedColor,
+      matchedVariant: variant
+    });
+
     if (!variant) {
       console.warn("⚠️ No matching variant selected. Ensure both size and color are selected.");
       alert("Please select both a size and color.");
       return;
     }
 
-    // Log the variant object and its fields for debugging
-    console.log("🛒 Add to Cart - Selected variant:", variant);
-
     await updateStripePriceId(variant);
+    console.log("🧪 Final variant after lookup:", variant);
 
     if (!variant?.stripe_price_id) {
-      console.warn("⚠️ No Stripe price ID on Add to Cart variant:", variant);
-      alert("Price is still loading. Please wait a moment and try again.");
-      return;
-    }
-
-    if (!variant?.stripe_price_id) {
-      console.warn("⚠️ No Stripe price ID on Add to Cart variant after retry:", variant);
-      alert("Product price is still loading. Please try again shortly.");
+      console.warn("⚠️ Add to Cart blocked — no stripe_price_id after lookup:", variant);
+      alert("This product is still loading a price. Please wait a moment and try again.");
       return;
     }
 
