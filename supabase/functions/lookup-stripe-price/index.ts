@@ -57,6 +57,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     });
   }
 
+  console.log("🔑 Using Stripe mode:", mode, "Prefix:", STRIPE_SECRET.slice(0, 10));
+
   const stripe = new Stripe(STRIPE_SECRET, { apiVersion: "2023-10-16" });
 
   try {
@@ -70,6 +72,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         const price = priceSearch.data[0];
         const product = await stripe.products.retrieve(price.product as string);
 
+        console.log("✅ Found price via sync_variant_id:", price.id);
         return new Response(JSON.stringify({
           stripe_price_id: price.id,
           currency: price.currency,
@@ -83,6 +86,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
           },
         }), { status: 200, headers: corsHeaders });
       }
+
+      console.warn("⚠️ No price found with sync_variant_id:", sync_variant_id);
     }
 
     // 🔍 2. Fallback: fuzzy match by normalized product_name
@@ -104,20 +109,20 @@ Deno.serve(async (req: Request): Promise<Response> => {
         .trim();
 
     const normalizedInput = normalize(product_name);
-    console.log("🔍 Searching fallback for:", normalizedInput);
+    console.log("🔍 Fallback lookup for:", normalizedInput);
 
     const products = await stripe.products.list({ limit: 100 });
 
     const product = products.data.find((p: Product) => {
       const composed = normalize(`${p.metadata?.printful_product_name} - ${p.metadata?.printful_variant_name}`);
-      return (
-        normalize(p.name) === normalizedInput ||
-        composed === normalizedInput ||
-        composed.includes(normalizedInput)
-      );
+      const match = normalize(p.name) === normalizedInput || composed === normalizedInput || composed.includes(normalizedInput);
+      const modeMatch = (p.metadata?.mode || "test") === mode;
+
+      return match && modeMatch;
     });
 
     if (!product) {
+      console.warn("❌ Product not found in fallback mode:", mode);
       return new Response(JSON.stringify({ error: "Product not found" }), {
         status: 404,
         headers: corsHeaders,

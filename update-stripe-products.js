@@ -23,6 +23,17 @@ if (!process.env.PRINTFUL_API_KEY) throw new Error("❌ Missing PRINTFUL_API_KEY
 
 const stripe = new Stripe(STRIPE_KEY, { apiVersion: "2023-10-16" });
 
+function normalize(str = "") {
+  return str
+    .normalize("NFKD")
+    .replace(/[’']/g, "")
+    .replace(/[-()_/\\|]/g, "")
+    .replace(/[^\w\s]/g, "")
+    .replace(/\s+/g, " ")
+    .toLowerCase()
+    .trim();
+}
+
 async function run() {
   console.log(`🧼 Cleaning + updating Stripe metadata (${MODE.toUpperCase()})`);
   const products = await getAllStripeProducts(stripe);
@@ -41,34 +52,37 @@ async function run() {
     try {
       const { title, metadata } = await getPrintfulVariantDetails(variantId);
 
-      // ✅ Construct new clean metadata (only desired fields)
+      const composedName = `${metadata.printful_product_name} - ${metadata.printful_variant_name}`.trim();
+
       const cleanedMetadata = {
         sync_variant_id: metadata.sync_variant_id,
         sku: metadata.sku,
         printful_variant_name: metadata.printful_variant_name,
         printful_product_name: metadata.printful_product_name,
+        stripe_product_name: composedName,
         size: metadata.size,
         color: metadata.color,
-        image_url: metadata.image_url
+        image_url: metadata.image_url,
+        mode: MODE
       };
 
-      // Compare using a filtered version of current metadata (without legacy fields)
+      // Filter current metadata to remove legacy fields
       const currentCleaned = { ...product.metadata };
       delete currentCleaned.printful_variant_id;
       delete currentCleaned.legacy_printful_variant_id;
       delete currentCleaned.legacy_printful_sync_product_id;
 
       const needsUpdate =
-        product.name !== title ||
+        product.name !== composedName ||
         JSON.stringify(currentCleaned) !== JSON.stringify(cleanedMetadata);
 
       if (needsUpdate && !DRY_RUN) {
         await stripe.products.update(product.id, {
-          name: title,
+          name: composedName,
           metadata: cleanedMetadata,
           active: true
         });
-        console.log(`✅ Cleaned + updated: ${title}`);
+        console.log(`✅ Cleaned + updated: ${composedName}`);
         updated++;
       } else {
         skipped++;

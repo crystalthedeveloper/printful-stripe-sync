@@ -52,16 +52,25 @@ async function run() {
         continue;
       }
 
-      // ✅ Compose product name: required by lookup-stripe-price.ts
+      // ✅ Normalize and compose product name (safe for Stripe lookup)
+      const normalize = str =>
+        str?.normalize("NFKD")
+          .replace(/[’']/g, "")
+          .replace(/[-()_/\\|]/g, "")
+          .replace(/[^\w\s]/g, "")
+          .replace(/\s+/g, " ")
+          .toLowerCase()
+          .trim() || "";
+
       const composedName = `${printful_product_name} - ${printful_variant_name}`.trim();
 
-      // ✅ Clean metadata — add stripe_product_name for debugging & matching
+      // ✅ Clean metadata — include mode
       const stripeMetadata = {
         sync_variant_id,
         sku,
         printful_variant_name,
         printful_product_name,
-        stripe_product_name: composedName, // 👈 added here
+        stripe_product_name: composedName,
         size,
         color,
         image_url,
