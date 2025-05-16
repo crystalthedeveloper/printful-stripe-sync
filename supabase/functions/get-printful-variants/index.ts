@@ -1,6 +1,8 @@
-// Supabase Edge Function: get-printful-variants.ts
-// Fetches all variants from a Printful product by product_id
+// get-printful-variants.ts — includes Stripe price IDs
+import Stripe from "https://esm.sh/stripe@12.1.0?target=deno";
 
+const STRIPE_SECRET_TEST = Deno.env.get("STRIPE_SECRET_TEST");
+const STRIPE_SECRET_LIVE = Deno.env.get("STRIPE_SECRET_KEY");
 const PRINTFUL_API_KEY = Deno.env.get("PRINTFUL_API_KEY");
 
 const corsHeaders = {
@@ -8,46 +10,37 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
 };
 
-interface PrintfulVariantFile {
+interface PrintfulFile {
   type: string;
   preview_url?: string;
 }
 
-interface PrintfulSyncVariant {
-  id: number;
-  name: string;
-  size: string;
-  color: string;
-  available: boolean;
-  retail_price: string;
-  files?: PrintfulVariantFile[];
-  product?: {
-    name?: string;
-    image?: string;
-  };
+interface PrintfulProduct {
+  name?: string;
+  image?: string;
 }
 
-interface PrintfulProductResponse {
-  result: {
-    sync_variants: PrintfulSyncVariant[];
-  };
+interface PrintfulVariant {
+  id: number;
+  name: string;
+  size?: string;
+  color?: string;
+  available?: boolean;
+  retail_price: string;
+  files?: PrintfulFile[];
+  product?: PrintfulProduct;
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
   const { searchParams } = new URL(req.url);
   const productId = searchParams.get("product_id");
-  const mode = searchParams.get("mode") || "live"; // optional for future use
+  const mode = searchParams.get("mode") || "live";
 
-  // Allow all product IDs including test ones on mobile
-  if (productId && productId.startsWith("00") && mode !== "live") {
-    return new Response(JSON.stringify({ mode, variants: [] }), {
-      status: 200,
-      headers: corsHeaders,
-    });
-  }
+  const STRIPE_SECRET = mode === "live" ? STRIPE_SECRET_LIVE : STRIPE_SECRET_TEST;
+  const stripe = new Stripe(STRIPE_SECRET, { apiVersion: "2023-10-16" });
 
-  if (!PRINTFUL_API_KEY) {
-    return new Response(JSON.stringify({ error: "Missing Printful API key" }), {
+  if (!PRINTFUL_API_KEY || !STRIPE_SECRET) {
+    return new Response(JSON.stringify({ error: "Missing keys" }), {
       status: 500,
       headers: corsHeaders,
     });
@@ -61,70 +54,75 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   try {
-    const response = await fetch(`https://api.printful.com/store/products/${productId}`, {
+    const res = await fetch(`https://api.printful.com/store/products/${productId}`, {
       headers: {
         Authorization: `Bearer ${PRINTFUL_API_KEY}`,
         "Content-Type": "application/json",
       },
     });
 
-    if (!response.ok) {
-      const error = await response.json();
-      console.error("❌ Printful API error:", error);
-      return new Response(JSON.stringify({ error: error.message || "Printful API error" }), {
-        status: response.status,
+    if (!res.ok) {
+      const error = await res.json();
+      return new Response(JSON.stringify({ error: error.message }), {
+        status: res.status,
         headers: corsHeaders,
       });
     }
 
-    const data: PrintfulProductResponse = await response.json();
-    const variants = (data.result?.sync_variants || []).map((variant) => {
-      const previewFile = variant.files?.find((file) => file.type === "preview");
-      const imageUrl = previewFile?.preview_url || variant.product?.image || "";
+    const data = await res.json();
+    const variants: PrintfulVariant[] = data.result.sync_variants || [];
 
-      // Sanitize names to match Stripe metadata
-      const sanitizeName = (name: string = "") =>
-        name
-          .replace(/\|/g, "")
-          .replace(/[()]/g, "")
-          .replace(/[^\w\s-]/g, "")
-          .trim();
+    const results = await Promise.all(
+      variants.map(async (variant: PrintfulVariant) => {
+        const sanitize = (s: string): string =>
+          (s || "")
+            .replace(/\|/g, "")
+            .replace(/[()]/g, "")
+            .replace(/[^\w\s-]/g, "")
+            .trim();
 
-      const originalProductName = variant.product?.name || "";
-      const originalVariantName = variant.name;
+        const productName = sanitize(variant.product?.name || "");
+        const variantName = sanitize(variant.name);
+        const composedName = `${productName} - ${variantName}`;
+        const syncId = String(variant.id);
 
-      const sanitizedProductName = sanitizeName(originalProductName);
-      const sanitizedVariantName = sanitizeName(originalVariantName);
-      const stripeProductName = `${sanitizedProductName} - ${sanitizedVariantName}`;
+        let stripe_price_id: string | null = null;
+        try {
+          const priceSearch = await stripe.prices.search({
+            query: `metadata['sync_variant_id']:'${syncId}'`,
+          });
+          if (priceSearch.data.length > 0) {
+            stripe_price_id = priceSearch.data[0].id;
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Unknown Stripe error";
+          console.warn("⚠️ Stripe price search failed for", syncId, message);
+        }
 
-      console.log("🔍 Stripe Name Mapping:", {
-        originalProductName,
-        originalVariantName,
-        sanitizedProductName,
-        sanitizedVariantName,
-        stripeProductName
-      });
+        const previewFile = variant.files?.find((f: PrintfulFile) => f.type === "preview");
 
-      return {
-        sync_variant_id: variant.id,
-        variant_name: sanitizedVariantName,
-        stripe_product_name: stripeProductName,
-        printful_product_name: sanitizedProductName, // ✅ sanitized product name
-        size: variant.size?.toUpperCase() || "N/A",
-        color: variant.color?.toLowerCase() || "unknown",
-        available: variant.available !== false,
-        retail_price: variant.retail_price,
-        image_url: imageUrl,
-      };
-    });
+        return {
+          sync_variant_id: syncId,
+          variant_name: variantName,
+          stripe_product_name: composedName,
+          printful_product_name: productName,
+          size: variant.size?.toUpperCase() || "N/A",
+          color: variant.color?.toLowerCase() || "unknown",
+          available: variant.available !== false,
+          retail_price: variant.retail_price,
+          image_url: previewFile?.preview_url || variant.product?.image || "",
+          stripe_price_id,
+        };
+      })
+    );
 
-    return new Response(JSON.stringify({ mode, variants }), {
+    return new Response(JSON.stringify({ mode, variants: results }), {
       status: 200,
       headers: corsHeaders,
     });
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Unexpected error";
-    console.error("❌ Exception in get-printful-variants.ts:", message);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unexpected server error";
+    console.error("❌ Failed:", message);
     return new Response(JSON.stringify({ error: message }), {
       status: 500,
       headers: corsHeaders,

@@ -1,12 +1,8 @@
 // create-checkout-session.ts — Stripe + Printful Only (No Supabase)
 import { serve } from "https://deno.land/std@0.192.0/http/server.ts";
 
-// ✅ Change this to "live" when ready to go live
-const MODE: "test" | "live" = "live";
-
 const STRIPE_SECRET_TEST = Deno.env.get("STRIPE_SECRET_TEST");
 const STRIPE_SECRET_LIVE = Deno.env.get("STRIPE_SECRET_KEY");
-
 const stripeEndpoint = "https://api.stripe.com/v1/checkout/sessions";
 
 const corsHeaders = {
@@ -15,8 +11,6 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type",
   "Content-Type": "application/json"
 };
-
-const STRIPE_SECRET_KEY = MODE === "live" ? STRIPE_SECRET_TEST : STRIPE_SECRET_LIVE;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -34,6 +28,7 @@ serve(async (req) => {
     const {
       line_items,
       email,
+      environment = "live", // 👈 dynamic mode support from payload
       success_url = "https://www.crystalthedeveloper.ca/store/success",
       cancel_url = "https://www.crystalthedeveloper.ca/store/cancel",
       shipping_countries = ["US", "CA"]
@@ -46,8 +41,10 @@ serve(async (req) => {
       });
     }
 
+    const STRIPE_SECRET_KEY = environment === "live" ? STRIPE_SECRET_LIVE : STRIPE_SECRET_TEST;
+
     if (!STRIPE_SECRET_KEY) {
-      return new Response(JSON.stringify({ error: `Missing Stripe secret for ${MODE}` }), {
+      return new Response(JSON.stringify({ error: `Missing Stripe secret for ${environment}` }), {
         status: 500,
         headers: corsHeaders,
       });
@@ -80,14 +77,13 @@ serve(async (req) => {
 
     shipping_countries.forEach((code: string, i: number) => {
       formData.append(`shipping_address_collection[allowed_countries][${i}]`, code);
-    });    
+    });
 
     if (email) {
       formData.append("customer_email", email);
     }
 
-    // Add mode as metadata for webhook filtering
-    formData.append("metadata[mode]", MODE);
+    formData.append("metadata[mode]", environment);
 
     const stripeRes = await fetch(stripeEndpoint, {
       method: "POST",
@@ -117,7 +113,7 @@ serve(async (req) => {
 
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unexpected server error";
-    console.error("❌ Unexpected error:", err);
+    console.error("❌ Unexpected error:", message);
     return new Response(JSON.stringify({ error: message }), {
       status: 500,
       headers: corsHeaders,

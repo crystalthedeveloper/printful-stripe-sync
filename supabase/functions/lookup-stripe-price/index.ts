@@ -1,4 +1,5 @@
 // Supabase Edge Function: lookup-stripe-price.ts
+
 import Stripe from "https://esm.sh/stripe@12.1.0?target=deno";
 import type { Product, Price } from "https://esm.sh/stripe@12.1.0?target=deno";
 
@@ -62,7 +63,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const stripe = new Stripe(STRIPE_SECRET, { apiVersion: "2023-10-16" });
 
   try {
-    // 🔍 1. Prefer sync_variant_id for exact match
     if (sync_variant_id) {
       const priceSearch = await stripe.prices.search({
         query: `metadata['sync_variant_id']:'${sync_variant_id}'`,
@@ -72,7 +72,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
         const price = priceSearch.data[0];
         const product = await stripe.products.retrieve(price.product as string);
 
-        console.log("✅ Found price via sync_variant_id:", price.id);
         return new Response(JSON.stringify({
           stripe_price_id: price.id,
           currency: price.currency,
@@ -90,7 +89,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
       console.warn("⚠️ No price found with sync_variant_id:", sync_variant_id);
     }
 
-    // 🔍 2. Fallback: fuzzy match by normalized product_name
     if (!product_name) {
       return new Response(JSON.stringify({ error: "Missing product_name or sync_variant_id" }), {
         status: 400,
@@ -102,7 +100,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       (str || "")
         .normalize("NFKD")
         .replace(/[’']/g, "")
-        .replace(/[-()_/\\|]/g, "")
+        .replace(/[-()_/\|]/g, "")
         .replace(/[^\w\s]/g, "")
         .replace(/\s+/g, " ")
         .toLowerCase()
@@ -122,7 +120,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
     });
 
     if (!product) {
-      console.warn("❌ Product not found in fallback mode:", mode);
       return new Response(JSON.stringify({ error: "Product not found" }), {
         status: 404,
         headers: corsHeaders,
