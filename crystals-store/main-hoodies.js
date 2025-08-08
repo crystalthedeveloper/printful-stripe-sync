@@ -1,7 +1,7 @@
 // main-hoodies.js
 
-import { updateCartUI } from "https://cdn.jsdelivr.net/gh/crystalthedeveloper/printful-stripe-sync@v0.2.0/crystals-store/ui.js";
-import { loadVariants, checkoutCart } from "https://cdn.jsdelivr.net/gh/crystalthedeveloper/printful-stripe-sync@v0.2.0/crystals-store/variants.js";
+import { updateCartUI } from "https://cdn.jsdelivr.net/gh/crystalthedeveloper/printful-stripe-sync@v1.0.0/crystals-store/ui.js";
+import { loadVariants, checkoutCart } from "https://cdn.jsdelivr.net/gh/crystalthedeveloper/printful-stripe-sync@v1.0.0/crystals-store/variants.js";
 
 const STRIPE_MODE = "live"; // change to "live" when ready
 
