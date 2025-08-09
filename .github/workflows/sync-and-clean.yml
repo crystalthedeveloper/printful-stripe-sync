@@ -2,56 +2,46 @@ name: 🔁 Sync Printful to Stripe & Update Metadata
 
 on:
   schedule:
-    - cron: '0 6 * * *'  # Daily at 6 AM UTC
+    - cron: '0 6 * * *' # daily at 6 AM UTC
   workflow_dispatch:
 
 jobs:
   sync-and-update:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    concurrency:
+      group: printful-stripe-sync
+      cancel-in-progress: false
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
+          cache: 'npm'
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
-      # SYNC Printful → Stripe for TEST
-      - name: 🔄 Sync Printful to Stripe (TEST)
+      # --- TEST ---
+      - name: 🔄 Sync Printful → Stripe (TEST)
         env:
-          DRY_RUN: false
-          PRINTFUL_API_KEY: ${{ secrets.PRINTFUL_API_KEY }}
-          STRIPE_SECRET_TEST: ${{ secrets.STRIPE_SECRET_TEST }}
-        run: node sync-printful-products.js test
+          DRY_RUN: "false"
+          MODE: "test"
+          PRINTFUL_TOKEN: ${{ secrets.PRINTFUL_TOKEN }}
+          PRINTFUL_STORE_ID: ${{ secrets.PRINTFUL_STORE_ID }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_TEST }}
+        run: node sync-printful-to-stripe.js
 
-      # SYNC Printful → Stripe for LIVE
-      - name: 🔄 Sync Printful to Stripe (LIVE)
+      # --- LIVE ---
+      - name: 🔄 Sync Printful → Stripe (LIVE)
         env:
-          DRY_RUN: false
-          PRINTFUL_API_KEY: ${{ secrets.PRINTFUL_API_KEY }}
-          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
-        run: node sync-printful-products.js live
-
-      # UPDATE Stripe Product Metadata for TEST
-      - name: 🛠️ Update Stripe Product Metadata (TEST)
-        env:
-          DRY_RUN: false
-          PRINTFUL_API_KEY: ${{ secrets.PRINTFUL_API_KEY }}
-          STRIPE_SECRET_TEST: ${{ secrets.STRIPE_SECRET_TEST }}
-        run: node update-stripe-products.js test
-
-      # UPDATE Stripe Product Metadata for LIVE
-      - name: 🛠️ Update Stripe Product Metadata (LIVE)
-        env:
-          DRY_RUN: false
-          PRINTFUL_API_KEY: ${{ secrets.PRINTFUL_API_KEY }}
-          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
-        run: node update-stripe-products.js live
-
-      - name: 🔍 Show logs on failure
-        if: failure()
-        run: echo "❌ Workflow failed. Check logs above for details."
+          DRY_RUN: "false"
+          MODE: "live"
+          PRINTFUL_TOKEN: ${{ secrets.PRINTFUL_TOKEN }}
+          PRINTFUL_STORE_ID: ${{ secrets.PRINTFUL_STORE_ID }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_TEST }}
+        run: node sync-printful-to-stripe.js
