@@ -2,9 +2,12 @@
 import Stripe from "stripe";
 import axios from "axios";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);    // test or live
-const PRINTFUL_TOKEN = process.env.PRINTFUL_TOKEN;            // Printful API token
-const STORE_ID = "15782035";                                  // your Printful store id
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+const PRINTFUL_TOKEN = process.env.PRINTFUL_TOKEN;
+const STORE_ID = process.env.PRINTFUL_STORE_ID;            // ✅ use env
+if (!PRINTFUL_TOKEN || !STORE_ID) {
+  throw new Error("Missing PRINTFUL_TOKEN or PRINTFUL_STORE_ID");
+}
 
 const pf = axios.create({
   baseURL: "https://api.printful.com",
