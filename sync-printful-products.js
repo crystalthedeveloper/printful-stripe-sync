@@ -1,97 +1,120 @@
-/**
- * sync-printful-products.js
- *
- * Purpose: Sync Printful products and their variants into Stripe.
- * - Avoids duplicates by matching sync_variant_id.
- * - Ensures metadata is clean (no legacy keys).
- * - Creates or updates prices with proper metadata.
- */
-
-import dotenv from "dotenv";
+// sync-printful-to-stripe.js
 import Stripe from "stripe";
-import {
-  getPrintfulProducts,
-  getOrCreateProduct,
-  ensurePriceExists,
-} from "./utils.js";
+import axios from "axios";
 
-dotenv.config();
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);    // test or live
+const PRINTFUL_TOKEN = process.env.PRINTFUL_TOKEN;            // Printful API token
+const STORE_ID = "15782035";                                  // your Printful store id
 
-const DRY_RUN = process.env.DRY_RUN === "true";
-const MODE = process.argv[2] || process.env.MODE || "test";
-const STRIPE_KEY = MODE === "live"
-  ? process.env.STRIPE_SECRET_KEY
-  : process.env.STRIPE_SECRET_TEST;
+const pf = axios.create({
+  baseURL: "https://api.printful.com",
+  headers: { Authorization: `Bearer ${PRINTFUL_TOKEN}` }
+});
 
-if (!STRIPE_KEY) throw new Error(`❌ Missing Stripe key for mode: ${MODE.toUpperCase()}`);
-if (!process.env.PRINTFUL_API_KEY) throw new Error("❌ Missing PRINTFUL_API_KEY");
+async function getPrintfulProducts() {
+  const { data } = await pf.get(`/stores/${STORE_ID}/products`);
+  return data.result; // [{ id, external_id, name, thumbnail, ... }]
+}
 
-const stripe = new Stripe(STRIPE_KEY, { apiVersion: "2023-10-16" });
+async function getPrintfulProduct(productId) {
+  // returns { product, variants: [...] } – variants include files with preview urls
+  const { data } = await pf.get(`/stores/${STORE_ID}/products/${productId}`);
+  return data.result;
+}
 
-async function run() {
-  console.log(`🚀 Syncing Printful → Stripe (${MODE.toUpperCase()} mode)`);
+// --- NEW: pick a good image for a variant
+function variantImageUrl(variant) {
+  // Printful usually includes files like [{type:"preview", preview_url:...}, {type:"default", ...}]
+  const fromFiles =
+    variant?.files?.find(f => f.type === "preview")?.preview_url ||
+    variant?.files?.find(f => f.type === "default")?.preview_url ||
+    variant?.files?.[0]?.preview_url;
+  // fallbacks just in case
+  return fromFiles || variant?.image || variant?.preview || "";
+}
 
+async function upsertStripeProduct({ name, description, images, metadata }) {
+  // prefer a stable identity via printful_external_id
+  const list = await stripe.products.list({ active: true, limit: 100 });
+  let product = list.data.find(p => p.metadata?.printful_external_id === metadata.printful_external_id);
+
+  if (product) {
+    return await stripe.products.update(product.id, { name, description, images, metadata });
+  }
+  return await stripe.products.create({ name, description, images, metadata });
+}
+
+async function upsertStripePrice(productId, { amount, currency, lookup_key, metadata }) {
+  const existing = await stripe.prices.list({ product: productId, active: true, limit: 100 });
+  const found = existing.data.find(pr => pr.lookup_key === lookup_key);
+  if (found) return found;
+
+  return await stripe.prices.create({
+    product: productId,
+    unit_amount: Math.round(Number(amount) * 100), // 90.00 -> 9000
+    currency, // "cad"
+    lookup_key,
+    metadata // includes size, color, printful ids, image_url
+  });
+}
+
+(async () => {
   const products = await getPrintfulProducts();
-  let added = 0, updated = 0, skipped = 0, errored = 0;
 
-  for (const { title, metadata, price } of products) {
-    try {
-      const {
-        sync_variant_id,
-        sku,
-        printful_variant_name,
-        printful_product_name,
-        size,
-        color,
-        image_url
-      } = metadata;
+  for (const p of products) {
+    const full = await getPrintfulProduct(p.id);
+    const { product, variants } = full;
 
-      if (!sync_variant_id || !sku || !price) {
-        console.warn(`⚠️ Skipping incomplete product: ${title}`);
-        skipped++;
-        continue;
+    // --- NEW: build Stripe product image gallery
+    const variantImgs = (variants || [])
+      .map(v => variantImageUrl(v))
+      .filter(Boolean);
+
+    const images = Array.from(
+      new Set([
+        product?.thumbnail,          // product-level thumbnail
+        ...variantImgs.slice(0, 6)   // a few variant previews (Stripe shows up to ~8 nicely)
+      ].filter(Boolean))
+    );
+
+    // 1) Create/Update Stripe Product
+    const stripeProduct = await upsertStripeProduct({
+      name: product?.name || p.name || "Product",
+      description: product?.description || "",
+      images, // <-- now includes Printful images
+      metadata: {
+        printful_product_id: String(product?.id ?? p.id),
+        printful_external_id: product?.external_id || "",
+        sku: product?.sku || ""
       }
+    });
 
-      // ✅ Normalize and compose product name (safe for Stripe lookup)
-      const normalize = str =>
-        str?.normalize("NFKD")
-          .replace(/[’']/g, "")
-          .replace(/[-()_/\\|]/g, "")
-          .replace(/[^\w\s]/g, "")
-          .replace(/\s+/g, " ")
-          .toLowerCase()
-          .trim() || "";
+    // 2) Create/Update a Stripe Price for each variant
+    for (const v of variants) {
+      const retail = v?.retail_price || "90.00"; // fallback if not set
+      const size = v?.size || v?.name?.match(/\b(3XL|2XL|XXL|XL|L|M|S|XS)\b/i)?.[0] || "";
+      const color = v?.color || v?.color_code || "Black";
+      const image_url = variantImageUrl(v);
 
-      const composedName = `${printful_product_name} - ${printful_variant_name}`.trim();
+      const baseName = (product?.name || p.name || "product").trim();
+      const lookup_key = `${baseName}_${color}_${size}`.replace(/\s+/g, "-").toLowerCase();
 
-      // ✅ Clean metadata — include mode
-      const stripeMetadata = {
-        sync_variant_id,
-        sku,
-        printful_variant_name,
-        printful_product_name,
-        stripe_product_name: composedName,
-        size,
-        color,
-        image_url,
-        mode: MODE
-      };
-
-      const { id, created } = await getOrCreateProduct(stripe, composedName, stripeMetadata, DRY_RUN);
-
-      await ensurePriceExists(stripe, id, price, sync_variant_id, image_url, DRY_RUN);
-
-      created ? added++ : updated++;
-      console.log(`${created ? "➕ Created" : "🔁 Updated"}: ${composedName}`);
-    } catch (err) {
-      console.error(`❌ Error syncing ${title}: ${err.message}`);
-      errored++;
+      await upsertStripePrice(stripeProduct.id, {
+        amount: retail,
+        currency: "cad",
+        lookup_key,
+        metadata: {
+          printful_variant_id: String(v?.id),
+          size,
+          color,
+          image_url // <-- stored for your frontend
+        }
+      });
     }
   }
 
-  console.log(
-    `✅ SYNC COMPLETE (${MODE.toUpperCase()}) → Added: ${added}, Updated: ${updated}, Skipped: ${skipped}, Errors: ${errored}`
-  );
-}
-
-run().catch(err => console.error("❌ Sync process failed:", err.message));
+  console.log("✅ Synced Printful products, images & variant prices to Stripe");
+})().catch(err => {
+  console.error(err?.response?.data || err);
+  process.exit(1);
+});
